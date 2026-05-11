@@ -46,11 +46,59 @@ const historyFilled = computed(() =>
     .filter((o) => o.state === 'closed')
     .sort((a, b) => new Date(b.issued).getTime() - new Date(a.issued).getTime()),
 );
-const historyOther = computed(() =>
-  orderHistory.value
-    .filter((o) => o.state !== 'closed')
-    .sort((a, b) => new Date(b.issued).getTime() - new Date(a.issued).getTime()),
-);
+
+const RECENT_WINDOW_MS = 48 * 60 * 60 * 1000;
+
+interface RecentTrade {
+  typeId: number;
+  typeName: string;
+  isBuyOrder: boolean;
+  price: number;
+  totalVolume: number;
+  totalProfit: number | undefined;
+  closedAt: number;
+}
+
+const recentlyTraded = computed((): RecentTrade[] => {
+  const cutoff = now.value - RECENT_WINDOW_MS;
+  // Keys of sides that still have open orders — suppress those
+  const openKeys = new Set(openOrders.value.map((o) => `${o.typeId}-${o.isBuyOrder}`));
+
+  const groups = new Map<string, { orders: CharacterOrder[]; latestClose: number }>();
+  for (const o of orderHistory.value) {
+    // Best proxy for "when this order closed" = issued + duration days
+    const closedAt = new Date(o.issued).getTime() + (o.duration ?? 0) * 24 * 60 * 60 * 1000;
+    if (closedAt < cutoff) continue;
+    const key = `${o.typeId}-${o.isBuyOrder}`;
+    if (openKeys.has(key)) continue; // still has an open order on this side
+    if (!groups.has(key)) groups.set(key, { orders: [], latestClose: 0 });
+    const g = groups.get(key)!;
+    g.orders.push(o);
+    if (closedAt > g.latestClose) g.latestClose = closedAt;
+  }
+
+  return Array.from(groups.values())
+    .map(({ orders, latestClose }) => {
+      // Pick the most recent order as the display representative
+      const sample = orders.reduce((best, o) => {
+        const t = new Date(o.issued).getTime() + (o.duration ?? 0) * 24 * 60 * 60 * 1000;
+        const bt = new Date(best.issued).getTime() + (best.duration ?? 0) * 24 * 60 * 60 * 1000;
+        return t > bt ? o : best;
+      });
+      const totalVolume = orders.reduce((s, o) => s + o.volumeTotal - o.volumeRemain, 0);
+      const totalProfit = orders.reduce((s, o) => s + (o.estimatedProfit ?? 0), 0);
+      return {
+        typeId: sample.typeId,
+        typeName: sample.typeName,
+        isBuyOrder: sample.isBuyOrder,
+        price: sample.price,
+        totalVolume,
+        totalProfit: totalProfit !== 0 ? totalProfit : undefined,
+        closedAt: latestClose,
+      };
+    })
+    .sort((a, b) => b.closedAt - a.closedAt);
+});
 
 const totalOpenValue = computed(() =>
   openOrders.value.reduce((s, o) => s + o.price * o.volumeRemain, 0),
@@ -95,7 +143,11 @@ function pct(order: CharacterOrder): number {
 }
 
 function relativeTime(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
+  return relativeTimeMs(new Date(iso).getTime());
+}
+
+function relativeTimeMs(ms: number): string {
+  const diff = Date.now() - ms;
   const m = Math.floor(diff / 60_000);
   if (m < 60) return `${m}m ago`;
   const h = Math.floor(m / 60);
@@ -185,17 +237,19 @@ async function openMarket(typeId: number, event: MouseEvent): Promise<void> {
           span.profit(v-if="o.estimatedProfit !== undefined" :class="o.estimatedProfit >= 0 ? 'pos' : 'neg'")
             | {{ o.estimatedProfit >= 0 ? '+' : '' }}{{ isk(o.estimatedProfit) }}
 
-    //- Order history — other (expired / cancelled)
-    section.order-section(v-if="historyOther.length > 0")
-      details
-        summary.section-title Expired / Cancelled ({{ historyOther.length }})
-        .order-row(v-for="o in historyOther" :key="o.orderId")
-          .order-name {{ o.typeName }}
-          .order-detail
-            span.side-badge(:class="o.isBuyOrder ? 'buy' : 'sell'") {{ o.isBuyOrder ? 'B' : 'S' }}
-            span.price {{ isk(o.price) }}
-            span.state-badge {{ o.state }}
-            span.time {{ relativeTime(o.issued) }}
+    //- Recently traded (last 48 h, no open order on the same side)
+    section.order-section(v-if="recentlyTraded.length > 0")
+      h3.section-title Recently Traded
+      .recent-trade-row(v-for="t in recentlyTraded" :key="`${t.typeId}-${t.isBuyOrder}`")
+        .trade-left
+          span.side-badge(:class="t.isBuyOrder ? 'buy' : 'sell'") {{ t.isBuyOrder ? 'B' : 'S' }}
+          span.trade-name(@click="copyName(t.typeName)" title="Click to copy") {{ t.typeName }}
+        .trade-right
+          span.price {{ isk(t.price) }}
+          span.trade-vol {{ t.totalVolume.toLocaleString() }}
+          span.profit(v-if="t.totalProfit !== undefined" :class="t.totalProfit >= 0 ? 'pos' : 'neg'")
+            | {{ t.totalProfit >= 0 ? '+' : '' }}{{ isk(t.totalProfit) }}
+          span.time {{ relativeTimeMs(t.closedAt) }}
 
     .empty-state(v-if="openOrders.length === 0 && orderHistory.length === 0 && !isLoading")
       | No orders found.
@@ -468,6 +522,53 @@ details>summary.section-title {
 .state-badge {
   color: #4a5a6a;
   font-size: 0.72rem;
+}
+
+.recent-trade-row {
+  align-items: center;
+  background: #0e1c2e;
+  border: 1px solid #1a2a3a;
+  border-radius: 0.35rem;
+  display: flex;
+  gap: 0.5rem;
+  justify-content: space-between;
+  padding: 0.35rem 0.55rem;
+}
+
+.trade-left {
+  align-items: center;
+  display: flex;
+  gap: 0.4rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.trade-name {
+  color: #c0d4e8;
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 500;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  &:hover {
+    color: #e8f4ff;
+    text-decoration: underline dotted;
+  }
+}
+
+.trade-right {
+  align-items: center;
+  display: flex;
+  flex-shrink: 0;
+  gap: 0.5rem;
+}
+
+.trade-vol {
+  color: #4a6a8a;
+  font-size: 0.74rem;
 }
 
 .profit {

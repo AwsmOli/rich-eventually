@@ -1,4 +1,4 @@
-import { computed, ref } from "vue";
+import { computed, ref, toRaw } from "vue";
 import { kvDelete, kvGet, kvSet } from "./idbService";
 
 const CLIENT_ID = import.meta.env.VITE_EVE_CLIENT_ID as string;
@@ -123,7 +123,7 @@ class EveAuthService {
     const remaining = this.accounts.value.filter((a) => a.characterId !== id);
     console.log('[eveAuth] removeCharacter: removing', id, '→ remaining', remaining.map(a => a.characterName));
     this.accounts.value = remaining;
-    void kvSet(ACCOUNTS_KEY, remaining);
+    void kvSet(ACCOUNTS_KEY, remaining.map((a) => toRaw(a)));
 
     if (this.activeCharacterId.value === id) {
       const next = remaining[0]?.characterId ?? undefined;
@@ -296,7 +296,7 @@ class EveAuthService {
       const updated = [...existing, newAuth];
       console.log('[eveAuth] storeTokens: writing', updated.map(a => a.characterName), 'for', characterName);
       this.accounts.value = updated;
-      await kvSet(ACCOUNTS_KEY, updated);
+      await kvSet(ACCOUNTS_KEY, updated.map((a) => toRaw(a)));
 
       // Make this character active (new login always switches to the added char).
       this.activeCharacterId.value = characterId;
