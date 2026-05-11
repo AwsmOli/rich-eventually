@@ -28,8 +28,18 @@ function getSelectValue(event: Event): string {
   return target instanceof HTMLSelectElement ? target.value : '';
 }
 
+const minProfitPerUnitDisplay = ref(formatNumberInput(Math.round(props.modelValue.minProfitPerUnit || 0)));
 const minItemValueDisplay = ref(formatNumberInput(Math.round((props.modelValue.minItemValue || 0) / 1_000_000)));
 const maxItemValueDisplay = ref(formatNumberInput(Math.round((props.modelValue.maxItemValue || 0) / 1_000_000)));
+
+function onMinProfitPerUnitInput(value: string): void {
+  const n = parseEuropeanNumber(value);
+  if (!isNaN(n)) {
+    const isk = Math.max(0, n);
+    update('minProfitPerUnit', isk);
+    minProfitPerUnitDisplay.value = formatNumberInput(isk);
+  }
+}
 
 function onMinItemValueInput(value: string): void {
   const n = parseEuropeanNumber(value);
@@ -77,13 +87,11 @@ form.filters(@submit.prevent="submit")
       )
     label.field
       span Min Profit / Unit (ISK)
-      input(
-        type="number"
-        min="0"
-        step="100"
+      input.formatted-number(
+        type="text"
         placeholder="0 = no limit"
-        :value="modelValue.minProfitPerUnit || ''"
-        @input="update('minProfitPerUnit', Number(getInputValue($event)))"
+        :value="minProfitPerUnitDisplay"
+        @input="onMinProfitPerUnitInput(getInputValue($event))"
       )
     label.field
       span Accounting Level (0-5)
