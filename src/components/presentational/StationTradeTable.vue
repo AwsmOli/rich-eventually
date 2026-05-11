@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 
 import { eveAuthService } from '../../services/eveAuthService';
 import type { StationTradeOpportunity } from '../../types/domain';
@@ -7,6 +7,8 @@ import IskValue from './IskValue.vue';
 
 type SortField = 'marginPercent' | 'profitPerUnit' | 'avgDailyTrades' | 'tradeVolumeIsk' | 'cheapestSellPrice' | 'vsAvg90d';
 type SortDir = 'asc' | 'desc';
+
+const LS_KEY = 'rich-eventually:pinned-trades';
 
 const SORT_OPTIONS: { value: SortField; label: string; }[] = [
   { value: 'tradeVolumeIsk', label: 'ISK Volume' },
@@ -29,15 +31,83 @@ const emit = defineEmits<{
 const sortField = ref<SortField>('tradeVolumeIsk');
 const sortDir = ref<SortDir>('desc');
 
+// ── Pin state ────────────────────────────────────────────────────────────────
+// Stored as full objects so pinned items remain visible even when filtered out.
+
+function loadPinned(): Map<number, StationTradeOpportunity> {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (!raw) return new Map();
+    const arr = JSON.parse(raw) as StationTradeOpportunity[];
+    return new Map(arr.map((o) => [o.typeId, o]));
+  } catch {
+    return new Map();
+  }
+}
+
+function savePinned(map: Map<number, StationTradeOpportunity>): void {
+  localStorage.setItem(LS_KEY, JSON.stringify([...map.values()]));
+}
+
+const pinnedItems = ref<Map<number, StationTradeOpportunity>>(loadPinned());
+
+// Refresh cached opportunity data whenever fresh rows arrive.
+watch(
+  () => props.rows,
+  (rows) => {
+    let changed = false;
+    for (const row of rows) {
+      if (pinnedItems.value.has(row.typeId)) {
+        pinnedItems.value.set(row.typeId, row);
+        changed = true;
+      }
+    }
+    if (changed) {
+      pinnedItems.value = new Map(pinnedItems.value);
+      savePinned(pinnedItems.value);
+    }
+  },
+);
+
+function togglePin(row: StationTradeOpportunity): void {
+  const map = new Map(pinnedItems.value);
+  if (map.has(row.typeId)) {
+    map.delete(row.typeId);
+  } else {
+    map.set(row.typeId, row);
+  }
+  pinnedItems.value = map;
+  savePinned(map);
+}
+
+const pinnedTypeIds = computed(() => new Set(pinnedItems.value.keys()));
+
+// ── Sorted rows ──────────────────────────────────────────────────────────────
+// Pinned rows always appear first (using fresh data if available, else cached).
+// Unpinned rows are sorted by the selected field.
+
 const sortedRows = computed(() => {
   const field = sortField.value;
   const dir = sortDir.value === 'asc' ? 1 : -1;
-  return [...props.rows].sort((a, b) => {
-    const av = a[field] ?? -Infinity;
-    const bv = b[field] ?? -Infinity;
-    return (av - bv) * dir;
-  });
+
+  const liveByType = new Map(props.rows.map((r) => [r.typeId, r]));
+
+  const pinnedRows = [...pinnedItems.value.keys()].map(
+    (id) => liveByType.get(id) ?? pinnedItems.value.get(id)!,
+  );
+
+  const unpinned = props.rows
+    .filter((r) => !pinnedTypeIds.value.has(r.typeId))
+    .sort((a, b) => {
+      const av = a[field] ?? -Infinity;
+      const bv = b[field] ?? -Infinity;
+      return (av - bv) * dir;
+    });
+
+  return [...pinnedRows, ...unpinned];
 });
+
+// ── Actions ──────────────────────────────────────────────────────────────────
 
 function copy(value: string): void {
   emit('copy', value);
@@ -65,7 +135,7 @@ function onSortDirChange(event: Event): void {
 
 <template lang="pug">
 .table-card
-  .controls(v-if="rows.length > 0")
+  .controls(v-if="sortedRows.length > 0 || rows.length > 0")
     label.sort-label Sort by
     select.sort-select(:value="sortField" @change="onSortChange")
       option(v-for="opt in SORT_OPTIONS" :key="opt.value" :value="opt.value") {{ opt.label }}
@@ -74,7 +144,7 @@ function onSortDirChange(event: Event): void {
       option(value="desc") ↓ High → Low
       option(value="asc") ↑ Low → High
   .loading(v-if="isLoading") Scanning station orders…
-  .empty(v-else-if="rows.length === 0") No station trading opportunities found for the current filters.
+  .empty(v-else-if="sortedRows.length === 0") No station trading opportunities found for the current filters.
   .tbl-wrap(v-else)
     table.tbl
       thead
@@ -87,9 +157,14 @@ function onSortDirChange(event: Event): void {
           th 90d avg price
           th vs 90d avg
       tbody
-        tr.trow(v-for="row in sortedRows" :key="row.typeId")
+        tr(:class="['trow', { 'trow--pinned': pinnedTypeIds.has(row.typeId), 'trow--has-inventory': row.hasInventory, 'trow--has-order': row.hasOpenOrder }]" v-for="row in sortedRows" :key="row.typeId")
           td.td-name
-            button.item-name(type="button" @click="copy(row.itemName); openMarket(row.typeId, $event)" title="Click to copy · Shift+click to open in market") {{ row.itemName }}
+            .name-row
+              button.item-name(type="button" @click="copy(row.itemName); openMarket(row.typeId, $event)" title="Click to copy · Shift+click to open in market") {{ row.itemName }}
+              .row-badges
+                span.badge.badge--inventory(v-if="row.hasInventory" title="You own this item") own
+                span.badge.badge--order(v-if="row.hasOpenOrder" title="You have an active order") ord
+                button.pin-btn(:class="{ active: pinnedTypeIds.has(row.typeId) }" type="button" @click.stop="togglePin(row)" :title="pinnedTypeIds.has(row.typeId) ? 'Unpin from top' : 'Pin to top'") 📌
           td(data-label="Buy / Sell")
             .price-pair
               .price-line
@@ -221,6 +296,75 @@ function onSortDirChange(event: Event): void {
     color: #87ffca;
     text-decoration: underline;
   }
+}
+
+.name-row {
+  align-items: center;
+  display: flex;
+  gap: 0.4rem;
+  justify-content: space-between;
+}
+
+.row-badges {
+  align-items: center;
+  display: flex;
+  flex-shrink: 0;
+  gap: 0.3rem;
+}
+
+.badge {
+  border-radius: 0.2rem;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 0.08rem 0.28rem;
+  text-transform: uppercase;
+
+  &--inventory {
+    background: rgba(125, 255, 155, 0.15);
+    color: #7dff9b;
+  }
+
+  &--order {
+    background: rgba(100, 180, 255, 0.15);
+    color: #64b4ff;
+  }
+}
+
+.pin-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.8rem;
+  line-height: 1;
+  opacity: 0.22;
+  padding: 0;
+  transition: opacity 0.15s;
+
+  &:hover {
+    opacity: 0.65;
+  }
+
+  &.active {
+    opacity: 1;
+  }
+}
+
+.trow--pinned td {
+  background: rgba(255, 205, 50, 0.04);
+}
+
+.trow--pinned td.td-name {
+  background: rgba(255, 205, 50, 0.07);
+  border-left: 3px solid rgba(255, 205, 50, 0.55);
+}
+
+.trow--has-inventory:not(.trow--pinned) td.td-name {
+  border-left: 3px solid rgba(125, 255, 155, 0.45);
+}
+
+.trow--has-order:not(.trow--pinned):not(.trow--has-inventory) td.td-name {
+  border-left: 3px solid rgba(100, 180, 255, 0.45);
 }
 
 .positive {

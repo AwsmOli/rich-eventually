@@ -155,6 +155,7 @@ async function findArbitrage(): Promise<void> {
 const DEFAULT_STATION_FILTERS: StationTradeFilters = {
   hubSystemId: 30000142, // Jita
   minMarginPercent: 5,
+  minProfitPerUnit: 0,
   brokerFeePercent: 3,
   accountingLevel: 5,
   minAvgDailyTrades: 10,

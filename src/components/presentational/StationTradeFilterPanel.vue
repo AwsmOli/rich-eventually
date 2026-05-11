@@ -53,6 +53,16 @@ form.filters(@submit.prevent="submit")
         @input="update('minMarginPercent', Number(getInputValue($event)))"
       )
     label.field
+      span Min Profit / Unit (ISK)
+      input(
+        type="number"
+        min="0"
+        step="100"
+        placeholder="0 = no limit"
+        :value="modelValue.minProfitPerUnit || ''"
+        @input="update('minProfitPerUnit', Number(getInputValue($event)))"
+      )
+    label.field
       span Accounting Level (0-5)
       input(
         type="number"

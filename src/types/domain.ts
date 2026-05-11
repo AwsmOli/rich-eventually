@@ -100,6 +100,8 @@ export interface ArbitrageQueryResult {
 export interface StationTradeFilters {
   hubSystemId: number;
   minMarginPercent: number;
+  /** Minimum after-fee profit per unit (ISK). 0 = no limit. */
+  minProfitPerUnit: number;
   brokerFeePercent: number;
   accountingLevel: number;
   minAvgDailyTrades: number;
@@ -120,4 +122,8 @@ export interface StationTradeOpportunity {
   tradeVolumeIsk: number; // avgDailyTrades × highestBuyPrice (rough ISK volume)
   avg90dPrice: number | undefined; // 90-day average transaction price
   vsAvg90d: number | undefined; // (midpoint - avg90dPrice) / avg90dPrice as fraction
+  /** True if the character currently has this item in their inventory. */
+  hasInventory: boolean;
+  /** True if the character has an open buy or sell order for this item. */
+  hasOpenOrder: boolean;
 }

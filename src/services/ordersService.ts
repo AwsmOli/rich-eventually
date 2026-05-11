@@ -88,6 +88,8 @@ class OrdersService {
   public readonly lastUpdatedAt = ref<number | undefined>(undefined);
   /** Timestamp when ESI cache expires and fresh data becomes available. */
   public readonly esiExpiresAt = ref<number | undefined>(undefined);
+  /** Character wallet balance in ISK — updated every poll. */
+  public readonly walletBalance = ref<number | undefined>(undefined);
   /** Total cost basis of all enriched inventory items — set by AssetsTab after enrichment. */
   public readonly totalAssetsValue = ref<number | undefined>(undefined);
 
@@ -161,24 +163,39 @@ class OrdersService {
 
       const { characterId } = eveAuthService.character.value;
 
-      const [rawAssets, rawOpen, rawHistory, rawTxns] = await Promise.all([
-        this.fetchAllPages<EsiAsset>(
-          `${ESI_BASE}/characters/${characterId}/assets/?datasource=tranquility`,
-          token,
-        ),
-        this.fetchAllPages<EsiOrder>(
-          `${ESI_BASE}/characters/${characterId}/orders/?datasource=tranquility`,
-          token,
-        ),
-        this.fetchAllPages<EsiHistoryOrder>(
-          `${ESI_BASE}/characters/${characterId}/orders/history/?datasource=tranquility`,
-          token,
-        ),
-        this.fetchAllPages<EsiTransaction>(
-          `${ESI_BASE}/characters/${characterId}/wallet/transactions/?datasource=tranquility`,
-          token,
-        ),
-      ]);
+      const [rawAssets, rawOpen, rawHistory, rawTxns, walletRaw] =
+        await Promise.all([
+          this.fetchAllPages<EsiAsset>(
+            `${ESI_BASE}/characters/${characterId}/assets/?datasource=tranquility`,
+            token,
+          ),
+          this.fetchAllPages<EsiOrder>(
+            `${ESI_BASE}/characters/${characterId}/orders/?datasource=tranquility`,
+            token,
+          ),
+          this.fetchAllPages<EsiHistoryOrder>(
+            `${ESI_BASE}/characters/${characterId}/orders/history/?datasource=tranquility`,
+            token,
+          ),
+          this.fetchAllPages<EsiTransaction>(
+            `${ESI_BASE}/characters/${characterId}/wallet/transactions/?datasource=tranquility`,
+            token,
+          ),
+          fetch(
+            `${ESI_BASE}/characters/${characterId}/wallet/?datasource=tranquility`,
+            {
+              headers: { Authorization: `Bearer ${token}` },
+              signal: AbortSignal.timeout(15_000),
+            },
+          )
+            .then((r) =>
+              r.ok ? (r.json() as Promise<number>) : Promise.resolve(undefined),
+            )
+            .catch(() => undefined),
+        ]);
+
+      if (walletRaw !== undefined)
+        this.walletBalance.value = walletRaw as number;
 
       // Use the earliest ESI expiry across all endpoints to schedule the next poll.
       const expiresAt = Math.min(

@@ -113,7 +113,6 @@ class MarketScannerService {
     this.fetchProgress.value = { current: 0, total: 0 };
     this.nextRefreshIn.value = undefined;
 
-    marketDataService.clearRegion(regionId);
     try {
       await marketDataService.fetchAndIndexRegion(regionId, (done, total) => {
         this.fetchProgress.value = { current: done, total };

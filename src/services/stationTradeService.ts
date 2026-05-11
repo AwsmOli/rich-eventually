@@ -5,6 +5,7 @@ import type {
   StationTradeOpportunity,
 } from "../types/domain";
 import { marketDataService } from "./marketDataService";
+import { ordersService } from "./ordersService";
 
 // The 5 major trade hubs: systemId → regionId
 export const TRADE_HUBS: Array<{
@@ -75,6 +76,12 @@ class StationTradeService {
       const sellRevenue = cheapestSell * (1 - salesTaxRate - brokerFeeRate);
       const margin = ((sellRevenue - buyCost) / buyCost) * 100;
       if (margin < filters.minMarginPercent) continue;
+      const profitPerUnitRaw = sellRevenue - buyCost;
+      if (
+        (filters.minProfitPerUnit ?? 0) > 0 &&
+        profitPerUnitRaw < filters.minProfitPerUnit
+      )
+        continue;
       candidateTypeIds.push(typeId);
     }
 
@@ -186,6 +193,12 @@ class StationTradeService {
         tradeVolumeIsk: avgDailyTrades * highestBuy,
         avg90dPrice,
         vsAvg90d,
+        hasInventory: ordersService.inventoryItems.value.some(
+          (i) => i.typeId === typeId,
+        ),
+        hasOpenOrder: ordersService.openOrders.value.some(
+          (o) => o.typeId === typeId,
+        ),
       });
     }
 

@@ -14,7 +14,7 @@ const emit = defineEmits<{
 }>();
 
 const character = eveAuthService.character;
-const walletBalance = ref<number | undefined>(undefined);
+const walletBalance = ordersService.walletBalance;
 const skills = ref<CharacterSkills | undefined>(undefined);
 
 const netWorth = computed(() => {
@@ -45,12 +45,8 @@ async function loadCharacterData(): Promise<void> {
   if (!character.value) return;
   isLoading.value = true;
   try {
-    const [fetchedSkills, balance] = await Promise.all([
-      characterService.getSkills(),
-      characterService.getWalletBalance(),
-    ]);
+    const fetchedSkills = await characterService.getSkills();
     skills.value = fetchedSkills;
-    walletBalance.value = balance;
     if (fetchedSkills) emit('skills-loaded', fetchedSkills);
   } finally {
     isLoading.value = false;
@@ -67,8 +63,8 @@ function login(): void {
 
 function logout(): void {
   eveAuthService.logout();
+  ordersService.walletBalance.value = undefined;
   skills.value = undefined;
-  walletBalance.value = undefined;
 }
 </script>
 

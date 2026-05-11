@@ -39,11 +39,11 @@ const nextUpdateIn = computed(() => {
   return `${Math.ceil(secs / 60)}m`;
 });
 
-// Only show the progress overlay on the initial load (no data yet).
-// Background re-polls run silently so they don't interrupt the user.
-const isInitialLoad = computed(() => enrichedItems.value.length === 0);
+// Only show the progress overlay before the first enrichment completes.
+// After data has loaded once, re-polls run silently in the background.
+const hasLoadedOnce = ref(false);
 const isProgressVisible = computed(
-  () => isInitialLoad.value && (ordersService.isLoading.value || isEnriching.value),
+  () => !hasLoadedOnce.value && (ordersService.isLoading.value || isEnriching.value),
 );
 
 // Ensure polling starts even if OrdersPanel is not mounted (e.g. sidebar collapsed).
@@ -173,6 +173,7 @@ async function enrich(items: InventoryItem[]): Promise<void> {
     enrichedItems.value = results;
   } finally {
     isEnriching.value = false;
+    hasLoadedOnce.value = true;
   }
 }
 
