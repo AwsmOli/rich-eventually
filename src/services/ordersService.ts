@@ -225,9 +225,10 @@ class OrdersService {
       if (walletRaw !== undefined)
         this.walletBalance.value = walletRaw as number;
 
-      // Use the earliest ESI expiry across all endpoints to schedule the next poll.
+      // Use the earliest ESI expiry from the order/wallet endpoints (these cache for ~1 min).
+      // Assets caches for ~20 min so we deliberately exclude it from the poll schedule.
       const expiresAt = Math.min(
-        ...[rawAssets, rawOpen, rawHistory, rawTxns]
+        ...[rawOpen, rawHistory, rawTxns]
           .map((r) => r.expiresAt)
           .filter((t): t is number => t !== undefined),
       );
