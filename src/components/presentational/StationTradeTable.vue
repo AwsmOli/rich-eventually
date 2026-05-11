@@ -198,13 +198,14 @@ function onSortDirChange(event: Event): void {
           th 90d avg price
           th vs 90d avg
       tbody
-        tr(:class="['trow', { 'trow--pinned': pinnedTypeIds.has(row.typeId), 'trow--hidden': hiddenTypeIds.has(row.typeId), 'trow--has-inventory': row.hasInventory, 'trow--has-order': row.hasOpenOrder }]" v-for="row in sortedRows" :key="row.typeId")
+        tr(:class="['trow', { 'trow--pinned': pinnedTypeIds.has(row.typeId), 'trow--hidden': hiddenTypeIds.has(row.typeId), 'trow--has-inventory': row.hasInventory, 'trow--has-order': row.hasOpenBuyOrder || row.hasOpenSellOrder }]" v-for="row in sortedRows" :key="row.typeId")
           td.td-name
             .name-row
               button.item-name(type="button" @click="copy(row.itemName); openMarket(row.typeId, $event)" title="Click to copy · Shift+click to open in market") {{ row.itemName }}
               .row-badges
                 span.badge.badge--inventory(v-if="row.hasInventory" title="You own this item") own
-                span.badge.badge--order(v-if="row.hasOpenOrder" title="You have an active order") ord
+                span.badge.badge--order-buy(v-if="row.hasOpenBuyOrder" title="You have an open buy order") B
+                span.badge.badge--order-sell(v-if="row.hasOpenSellOrder" title="You have an open sell order") S
                 button.pin-btn(:class="{ active: pinnedTypeIds.has(row.typeId) }" type="button" @click.stop="togglePin(row)" :title="pinnedTypeIds.has(row.typeId) ? 'Unpin from top' : 'Pin to top'") 📌
                 button.hide-btn(:class="{ active: hiddenTypeIds.has(row.typeId) }" type="button" @click.stop="toggleHide(row.typeId)" :title="hiddenTypeIds.has(row.typeId) ? 'Unhide' : 'Hide'") 🙈
           td(data-label="Buy / Sell")
@@ -367,9 +368,14 @@ function onSortDirChange(event: Event): void {
     color: #7dff9b;
   }
 
-  &--order {
-    background: rgba(100, 180, 255, 0.15);
-    color: #64b4ff;
+  &--order-buy {
+    background: rgba(100, 200, 255, 0.15);
+    color: #64c8ff;
+  }
+
+  &--order-sell {
+    background: rgba(255, 140, 100, 0.15);
+    color: #ff8c64;
   }
 }
 

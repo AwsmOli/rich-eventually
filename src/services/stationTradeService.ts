@@ -196,8 +196,11 @@ class StationTradeService {
         hasInventory: ordersService.inventoryItems.value.some(
           (i) => i.typeId === typeId,
         ),
-        hasOpenOrder: ordersService.openOrders.value.some(
-          (o) => o.typeId === typeId,
+        hasOpenBuyOrder: ordersService.openOrders.value.some(
+          (o) => o.typeId === typeId && o.isBuyOrder,
+        ),
+        hasOpenSellOrder: ordersService.openOrders.value.some(
+          (o) => o.typeId === typeId && !o.isBuyOrder,
         ),
       });
     }
