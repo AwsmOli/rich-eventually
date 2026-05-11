@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import type { StationTradeFilters } from '../../types/domain';
 import { TRADE_HUBS } from '../../services/stationTradeService';
+import { formatNumberInput, parseEuropeanNumber } from '../../utils/formatting';
+import { ref } from 'vue';
 
 const props = defineProps<{
   modelValue: StationTradeFilters;
@@ -24,6 +26,27 @@ function getInputValue(event: Event): string {
 function getSelectValue(event: Event): string {
   const target = event.target;
   return target instanceof HTMLSelectElement ? target.value : '';
+}
+
+const minItemValueDisplay = ref(formatNumberInput(Math.round((props.modelValue.minItemValue || 0) / 1_000_000)));
+const maxItemValueDisplay = ref(formatNumberInput(Math.round((props.modelValue.maxItemValue || 0) / 1_000_000)));
+
+function onMinItemValueInput(value: string): void {
+  const n = parseEuropeanNumber(value);
+  if (!isNaN(n)) {
+    const millions = Math.max(0, n);
+    update('minItemValue', millions * 1_000_000);
+    minItemValueDisplay.value = formatNumberInput(millions);
+  }
+}
+
+function onMaxItemValueInput(value: string): void {
+  const n = parseEuropeanNumber(value);
+  if (!isNaN(n)) {
+    const millions = Math.max(0, n);
+    update('maxItemValue', millions * 1_000_000);
+    maxItemValueDisplay.value = formatNumberInput(millions);
+  }
 }
 
 function submit(): void {
@@ -90,24 +113,20 @@ form.filters(@submit.prevent="submit")
         @input="update('minAvgDailyTrades', Number(getInputValue($event)))"
       )
     label.field
-      span Min Item Value (ISK)
-      input(
-        type="number"
-        min="0"
-        step="1000"
+      span Min Item Value (M ISK)
+      input.formatted-number(
+        type="text"
         placeholder="0 = no limit"
-        :value="modelValue.minItemValue || ''"
-        @input="update('minItemValue', Number(getInputValue($event)))"
+        :value="minItemValueDisplay"
+        @input="onMinItemValueInput(getInputValue($event))"
       )
     label.field
-      span Max Item Value (ISK)
-      input(
-        type="number"
-        min="0"
-        step="1000"
+      span Max Item Value (M ISK)
+      input.formatted-number(
+        type="text"
         placeholder="0 = no limit"
-        :value="modelValue.maxItemValue || ''"
-        @input="update('maxItemValue', Number(getInputValue($event)))"
+        :value="maxItemValueDisplay"
+        @input="onMaxItemValueInput(getInputValue($event))"
       )
   button.submit(type="submit" :disabled="isLoading")
     | {{ isLoading ? 'Scanning...' : 'Find Station Trades' }}
@@ -151,6 +170,12 @@ select {
   color: #ecf4ff;
   font: inherit;
   padding: 0.48rem 0.58rem;
+}
+
+.formatted-number {
+  font-family: 'Monaco', 'Courier New', monospace;
+  font-size: 0.9rem;
+  letter-spacing: 0.02em;
 }
 
 .submit {

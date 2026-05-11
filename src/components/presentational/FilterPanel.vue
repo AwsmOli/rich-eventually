@@ -21,7 +21,7 @@ const toSystemSuggestions = ref<Array<{ id: number; name: string; }>>([]);
 const showFromSuggestions = ref(false);
 const showToSuggestions = ref(false);
 const cargoDisplayValue = ref(formatNumberInput(props.modelValue.maxCargoHold));
-const investmentDisplayValue = ref(formatNumberInput(props.modelValue.maxInvestment));
+const investmentDisplayValue = ref(formatNumberInput(Math.round(props.modelValue.maxInvestment / 1_000_000)));
 const minDailyIskDisplayValue = ref(formatNumberInput(props.modelValue.minAvgDailyTradeCount));
 
 onMounted(async () => {
@@ -136,8 +136,9 @@ function onCargoInput(value: string): void {
 function onInvestmentInput(value: string): void {
   const numValue = parseEuropeanNumber(value);
   if (!isNaN(numValue)) {
-    updateNumber('maxInvestment', Math.max(1, numValue));
-    investmentDisplayValue.value = formatNumberInput(Math.max(1, numValue));
+    const millions = Math.max(1, numValue);
+    updateNumber('maxInvestment', millions * 1_000_000);
+    investmentDisplayValue.value = formatNumberInput(millions);
   }
 }
 
@@ -223,7 +224,7 @@ form.filters(@submit.prevent="submit")
         placeholder="0"
       )
     label.field
-      span Max Investment (ISK)
+      span Max Investment (M ISK)
       input.formatted-number(
         type="text"
         min="1"
