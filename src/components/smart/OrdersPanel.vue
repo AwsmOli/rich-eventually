@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onUnmounted, ref, watch } from 'vue';
+import { computed, onUnmounted, reactive, ref, watch } from 'vue';
 
 import { eveAuthService } from '../../services/eveAuthService';
 import { marketDataService } from '../../services/marketDataService';
@@ -159,6 +159,9 @@ async function copyName(name: string): Promise<void> {
   await navigator.clipboard.writeText(name);
 }
 
+// typeId -> timestamp when user opened the market window (for 5-min "can't update yet" hint)
+const recentUpdates = reactive(new Map<number, number>());
+
 async function openMarket(typeId: number, event: MouseEvent): Promise<void> {
   if (!event.shiftKey || !character.value) return;
   const token = await eveAuthService.getAccessToken();
@@ -167,6 +170,7 @@ async function openMarket(typeId: number, event: MouseEvent): Promise<void> {
     `https://esi.evetech.net/latest/ui/openwindow/marketdetails/?datasource=tranquility&type_id=${typeId}`,
     { method: 'POST', headers: { Authorization: `Bearer ${token}` } },
   );
+  recentUpdates.set(typeId, Date.now());
 }
 </script>
 
@@ -199,7 +203,7 @@ async function openMarket(typeId: number, event: MouseEvent): Promise<void> {
       h3.section-title Open Orders
       .order-group(v-if="openSell.length > 0")
         .group-label Sell
-        .order-row(v-for="o in openSell" :key="o.orderId" :class="{ outbid: outbidMap.has(o.orderId) }" :style="{ '--fill-pct': pct(o) + '%' }")
+        .order-row(v-for="o in openSell" :key="o.orderId" :class="{ outbid: outbidMap.has(o.orderId), 'recently-updated': outbidMap.has(o.orderId) && recentUpdates.has(o.typeId) && now - (recentUpdates.get(o.typeId) ?? 0) < 300000 }" :style="{ '--fill-pct': pct(o) + '%' }")
           .order-top
             span.order-name(@click="copyName(o.typeName); openMarket(o.typeId, $event)" title="Click to copy · Shift+click to open in market") {{ o.typeName }}
             span.outbid-badge(v-if="outbidMap.has(o.orderId)") {{ outbidMap.get(o.orderId)?.label }}
@@ -212,7 +216,7 @@ async function openMarket(typeId: number, event: MouseEvent): Promise<void> {
               | {{ (o.volumeTotal - o.volumeRemain).toLocaleString() }}/{{ o.volumeTotal.toLocaleString() }}
       .order-group(v-if="openBuy.length > 0")
         .group-label Buy
-        .order-row(v-for="o in openBuy" :key="o.orderId" :class="{ outbid: outbidMap.has(o.orderId) }" :style="{ '--fill-pct': pct(o) + '%' }")
+        .order-row(v-for="o in openBuy" :key="o.orderId" :class="{ outbid: outbidMap.has(o.orderId), 'recently-updated': outbidMap.has(o.orderId) && recentUpdates.has(o.typeId) && now - (recentUpdates.get(o.typeId) ?? 0) < 300000 }" :style="{ '--fill-pct': pct(o) + '%' }")
           .order-top
             span.order-name(@click="copyName(o.typeName); openMarket(o.typeId, $event)" title="Click to copy · Shift+click to open in market") {{ o.typeName }}
             span.outbid-badge(v-if="outbidMap.has(o.orderId)") {{ outbidMap.get(o.orderId)?.label }}
@@ -241,15 +245,9 @@ async function openMarket(typeId: number, event: MouseEvent): Promise<void> {
     section.order-section(v-if="recentlyTraded.length > 0")
       h3.section-title Recently Traded
       .recent-trade-row(v-for="t in recentlyTraded" :key="`${t.typeId}-${t.isBuyOrder}`")
-        .trade-left
-          span.side-badge(:class="t.isBuyOrder ? 'buy' : 'sell'") {{ t.isBuyOrder ? 'B' : 'S' }}
-          span.trade-name(@click="copyName(t.typeName)" title="Click to copy") {{ t.typeName }}
-        .trade-right
-          span.price {{ isk(t.price) }}
-          span.trade-vol {{ t.totalVolume.toLocaleString() }}
-          span.profit(v-if="t.totalProfit !== undefined" :class="t.totalProfit >= 0 ? 'pos' : 'neg'")
-            | {{ t.totalProfit >= 0 ? '+' : '' }}{{ isk(t.totalProfit) }}
-          span.time {{ relativeTimeMs(t.closedAt) }}
+        span.side-badge(:class="t.isBuyOrder ? 'buy' : 'sell'") {{ t.isBuyOrder ? 'B' : 'S' }}
+        span.trade-name(@click="copyName(t.typeName); openMarket(t.typeId, $event)" title="Click to copy · Shift+click to open in market") {{ t.typeName }}
+        span.time {{ relativeTimeMs(t.closedAt) }}
 
     .empty-state(v-if="openOrders.length === 0 && orderHistory.length === 0 && !isLoading")
       | No orders found.
@@ -419,6 +417,29 @@ details>summary.section-title {
       background: linear-gradient(to right, #7a3030 var(--fill-pct, 0%), transparent var(--fill-pct, 0%));
     }
   }
+
+  &.outbid.recently-updated {
+    background: #131006;
+    border-color: #5a4a10;
+
+    &::after {
+      background: linear-gradient(to right, #7a6a20 var(--fill-pct, 0%), transparent var(--fill-pct, 0%));
+    }
+
+    .outbid-badge {
+      background: #3a2a0a;
+      color: #d4a020;
+    }
+
+    .beat-arrow,
+    .beat-price {
+      color: #d4a020;
+    }
+
+    .price.price-beaten {
+      color: #5a4a1a;
+    }
+  }
 }
 
 .order-top {
@@ -531,21 +552,13 @@ details>summary.section-title {
   border-radius: 0.35rem;
   display: flex;
   gap: 0.5rem;
-  justify-content: space-between;
   padding: 0.35rem 0.55rem;
-}
-
-.trade-left {
-  align-items: center;
-  display: flex;
-  gap: 0.4rem;
-  min-width: 0;
-  flex: 1;
 }
 
 .trade-name {
   color: #c0d4e8;
   cursor: pointer;
+  flex: 1;
   font-size: 0.82rem;
   font-weight: 500;
   min-width: 0;
@@ -557,18 +570,6 @@ details>summary.section-title {
     color: #e8f4ff;
     text-decoration: underline dotted;
   }
-}
-
-.trade-right {
-  align-items: center;
-  display: flex;
-  flex-shrink: 0;
-  gap: 0.5rem;
-}
-
-.trade-vol {
-  color: #4a6a8a;
-  font-size: 0.74rem;
 }
 
 .profit {
