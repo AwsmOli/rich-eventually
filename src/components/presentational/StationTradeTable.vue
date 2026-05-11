@@ -202,10 +202,8 @@ function onSortDirChange(event: Event): void {
           th.th-name Item
           th Buy / Sell
           th Margin / Profit
-          th Daily trades
-          th ISK vol / day
-          th 90d avg price
-          th vs 90d avg
+          th Daily / ISK vol
+          th 90d avg
       tbody
         tr(:class="['trow', { 'trow--pinned': pinnedTypeIds.has(row.typeId), 'trow--hidden': hiddenTypeIds.has(row.typeId), 'trow--has-inventory': row.hasInventory, 'trow--has-order': openBuyTypeIds.has(row.typeId) || openSellTypeIds.has(row.typeId) }]" v-for="row in sortedRows" :key="row.typeId")
           td.td-name
@@ -234,18 +232,22 @@ function onSortDirChange(event: Event): void {
                 span(:class="row.profitPerUnit > 0 ? 'positive' : 'negative'")
                   | {{ row.profitPerUnit > 0 ? '+' : '' }}
                   IskValue(style="display:inline" :value="row.profitPerUnit")
-          td(data-label="Daily trades") {{ Math.round(row.avgDailyTrades).toLocaleString() }}
-          td(data-label="ISK vol / day")
-            IskValue(:value="row.tradeVolumeIsk")
-          td(data-label="90d avg price")
-            template(v-if="row.avg90dPrice !== undefined")
-              IskValue(:value="row.avg90dPrice")
-            template(v-else) —
-          td(data-label="vs 90d avg")
-            template(v-if="row.vsAvg90d !== undefined")
-              span(:class="row.vsAvg90d > 0 ? 'positive' : row.vsAvg90d < 0 ? 'negative' : 'neutral'")
-                | {{ row.vsAvg90d > 0 ? '+' : '' }}{{ (row.vsAvg90d * 100).toFixed(1) }}%
-            template(v-else) —
+          td(data-label="Daily / ISK vol")
+            .price-pair
+              .price-line {{ Math.round(row.avgDailyTrades).toLocaleString() }} / day
+              .price-line
+                IskValue(:value="row.tradeVolumeIsk")
+          td(data-label="90d avg")
+            .price-pair
+              .price-line
+                template(v-if="row.avg90dPrice !== undefined")
+                  IskValue(:value="row.avg90dPrice")
+                template(v-else) —
+              .price-line
+                template(v-if="row.vsAvg90d !== undefined")
+                  span(:class="row.vsAvg90d > 0 ? 'positive' : row.vsAvg90d < 0 ? 'negative' : 'neutral'")
+                    | {{ row.vsAvg90d > 0 ? '+' : '' }}{{ (row.vsAvg90d * 100).toFixed(1) }}%
+                template(v-else) —
 </template>
 
 <style scoped lang="scss">

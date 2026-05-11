@@ -32,6 +32,10 @@ watch(character, (c) => {
   else ordersService.stopPolling();
 }, { immediate: true });
 
+function forceRefresh(): void {
+  void ordersService.poll();
+}
+
 // ── Derived ──────────────────────────────────────────────────────────────────
 
 const openBuy = computed(() =>
@@ -176,7 +180,7 @@ async function openMarket(typeId: number, event: MouseEvent): Promise<void> {
     span.panel-title Orders
     span.panel-meta(v-if="nextUpdateIn") next update {{ nextUpdateIn }}
     span.panel-meta.panel-meta--updated(v-else-if="lastUpdatedAt") updated {{ relativeTime(new Date(lastUpdatedAt).toISOString()) }}
-    span.panel-loading(v-if="isLoading") ⟳
+    button.refresh-btn(v-if="character" type="button" @click="forceRefresh" :disabled="isLoading" title="Force refresh orders from ESI") ⟳
 
   .not-logged-in(v-if="!character")
     p Log in with EVE Online to view your orders.
@@ -281,10 +285,26 @@ async function openMarket(typeId: number, event: MouseEvent): Promise<void> {
   margin-left: auto;
 }
 
-.panel-loading {
-  animation: spin 1s linear infinite;
-  color: #5a8fa8;
+.refresh-btn {
+  animation: none;
+  background: none;
+  border: none;
+  color: #4a6a8a;
+  cursor: pointer;
   font-size: 0.85rem;
+  line-height: 1;
+  padding: 0;
+  transition: color 0.15s;
+
+  &:hover:not(:disabled) {
+    color: #5a9fc8;
+  }
+
+  &:disabled {
+    animation: spin 1s linear infinite;
+    color: #5a8fa8;
+    cursor: default;
+  }
 }
 
 @keyframes spin {

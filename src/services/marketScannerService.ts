@@ -4,10 +4,10 @@ import { MAJOR_REGIONS } from "./arbitrageService";
 import { esiApiService } from "./esiApiService";
 import { marketDataService } from "./marketDataService";
 
-const SCAN_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes per region
-// Spread region refreshes evenly across the 5-min window so we're continuously
-// trickling requests to ESI instead of bursting all 18 regions at once.
-const STAGGER_MS = Math.floor(SCAN_INTERVAL_MS / MAJOR_REGIONS.length); // ~16.7 s
+// Spread region refreshes evenly across a 5-min window on startup so we don't
+// burst all regions at once. After the first fetch the schedule is driven by
+// each region's own ESI Expires header.
+const INITIAL_STAGGER_MS = Math.floor((5 * 60 * 1000) / MAJOR_REGIONS.length); // ~16.7 s
 
 class MarketScannerService {
   /** True while any region is actively being fetched. */
@@ -64,7 +64,7 @@ class MarketScannerService {
     for (const regionId of MAJOR_REGIONS) {
       if (!this.activeRegions.has(regionId)) {
         this.scheduleRegion(regionId, delay);
-        delay += STAGGER_MS;
+        delay += INITIAL_STAGGER_MS;
       }
     }
   }
@@ -72,7 +72,7 @@ class MarketScannerService {
   private async init(): Promise<void> {
     // Schedule all regions immediately (staggered so we don't burst ESI).
     MAJOR_REGIONS.forEach((regionId, index) => {
-      this.scheduleRegion(regionId, index * STAGGER_MS);
+      this.scheduleRegion(regionId, index * INITIAL_STAGGER_MS);
     });
 
     this.startCountdown();
@@ -113,8 +113,9 @@ class MarketScannerService {
     this.fetchProgress.value = { current: 0, total: 0 };
     this.nextRefreshIn.value = undefined;
 
+    let expiresAt: number | undefined;
     try {
-      await marketDataService.fetchAndIndexRegion(regionId, (done, total) => {
+      expiresAt = await marketDataService.fetchAndIndexRegion(regionId, (done, total) => {
         this.fetchProgress.value = { current: done, total };
       });
       this.lastOrdersFetchedAt.value = Date.now();
@@ -127,8 +128,11 @@ class MarketScannerService {
       this.isFetchingOrders.value = false;
     }
 
-    // Schedule next refresh from completion time.
-    this.scheduleRegion(regionId, SCAN_INTERVAL_MS);
+    // Schedule next refresh from ESI's Expires header; fall back to 30 s if absent.
+    const delay = expiresAt
+      ? Math.max(5_000, expiresAt - Date.now() + 2_000)
+      : 30_000;
+    this.scheduleRegion(regionId, delay);
   }
 
   private startCountdown(): void {

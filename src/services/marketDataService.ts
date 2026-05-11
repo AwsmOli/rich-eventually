@@ -48,7 +48,7 @@ class MarketDataService {
     GetMarketsRegionIdOrders200Ok[]
   >();
   /** In-flight fetch promises, keyed by regionId — prevents duplicate concurrent fetches. */
-  private readonly regionFetchPromises = new Map<number, Promise<void>>();
+  private readonly regionFetchPromises = new Map<number, Promise<number | undefined>>();
   /** Cheapest sell price per type per system, built after each full region fetch. */
   private readonly cheapestSellBySystemType = new Map<
     number,
@@ -281,11 +281,12 @@ class MarketDataService {
    *
    * @param onPage  Called after each page batch with (pagesDone, pagesTotal).
    *                pagesTotal grows as x-pages headers are discovered per order type.
+   * Returns the ESI `Expires` timestamp (ms) from the first page response, or undefined.
    */
   public fetchAndIndexRegion(
     regionId: number,
     onPage?: (done: number, total: number) => void,
-  ): Promise<void> {
+  ): Promise<number | undefined> {
     const existing = this.regionFetchPromises.get(regionId);
     if (existing !== undefined) return existing;
 
@@ -299,10 +300,10 @@ class MarketDataService {
   private async doFetchAndIndex(
     regionId: number,
     onPage?: (done: number, total: number) => void,
-  ): Promise<void> {
+  ): Promise<number | undefined> {
     if (isMockModeEnabled()) {
       this.regionOrderCache.set(regionId, getMockOrders());
-      return;
+      return undefined;
     }
 
     // Mutable totals updated as x-pages headers arrive for each order type.
@@ -313,7 +314,7 @@ class MarketDataService {
 
     const fetchOrderType = async (
       orderType: "buy" | "sell",
-    ): Promise<GetMarketsRegionIdOrders200Ok[]> => {
+    ): Promise<{ orders: GetMarketsRegionIdOrders200Ok[]; expiresAt: number | undefined }> => {
       const firstResponse = await esiApiService.execute(
         `Fetch ${orderType} orders page 1 for region ${regionId}`,
         () =>
@@ -330,6 +331,8 @@ class MarketDataService {
         firstResponse.raw.headers.get("x-pages") ?? "1",
         10,
       );
+      const expiresHeader = firstResponse.raw.headers.get("expires");
+      const expiresAt = expiresHeader ? new Date(expiresHeader).getTime() : undefined;
 
       if (orderType === "sell") sellTotal = xPages;
       else buyTotal = xPages;
@@ -356,13 +359,13 @@ class MarketDataService {
         reportProgress();
       }
 
-      return allOrders;
+      return { orders: allOrders, expiresAt };
     };
 
     // Fetch sell then buy sequentially — running both in parallel doubles the
     // request rate and is the primary cause of ESI 429s.
-    const sellOrders = await fetchOrderType("sell");
-    const buyOrders = await fetchOrderType("buy");
+    const { orders: sellOrders, expiresAt } = await fetchOrderType("sell");
+    const { orders: buyOrders } = await fetchOrderType("buy");
 
     // Build cheapest sell price index BEFORE merging buy orders into the array.
     // (sellOrders array will be mutated below, so we must index it first.)
@@ -389,6 +392,8 @@ class MarketDataService {
 
     // Persist to localStorage so the next page load can skip this ESI burst.
     void this.saveRegionToStorage(regionId, allOrders);
+
+    return expiresAt;
   }
 
   /**

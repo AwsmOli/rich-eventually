@@ -18,7 +18,6 @@ import { kvGet, kvSet } from "./idbService";
 import { toastService } from "./toastService";
 
 const ESI_BASE = "https://esi.evetech.net/latest";
-const POLL_INTERVAL_MS = 60_000;
 
 // ── Domain types ──────────────────────────────────────────────────────────────
 
@@ -105,6 +104,7 @@ class OrdersService {
   private readonly nameCache = new Map<number, string>();
 
   private pollTimer: ReturnType<typeof setTimeout> | undefined;
+  private marketPriceTimer: ReturnType<typeof setTimeout> | undefined;
   private isPolling = false;
 
   constructor() {
@@ -162,15 +162,113 @@ class OrdersService {
       clearTimeout(this.pollTimer);
       this.pollTimer = undefined;
     }
+    if (this.marketPriceTimer !== undefined) {
+      clearTimeout(this.marketPriceTimer);
+      this.marketPriceTimer = undefined;
+    }
+  }
+
+  /**
+   * Fetches public market orders for each (regionId, typeId) in the character's open
+   * orders and patches price + volumeRemain from the 5-min-cached market data.
+   * Also triggers an immediate character orders repoll when any orderId disappears
+   * from the market (fill / cancellation / expiry detected early).
+   */
+  private async refreshOrderPrices(): Promise<void> {
+    const orders = this.openOrders.value;
+    if (orders.length === 0) return;
+
+    // Group by regionId → Set of typeIds to minimise ESI calls.
+    const byRegion = new Map<number, Set<number>>();
+    for (const o of orders) {
+      if (!o.regionId) continue;
+      let types = byRegion.get(o.regionId);
+      if (!types) {
+        types = new Set();
+        byRegion.set(o.regionId, types);
+      }
+      types.add(o.typeId);
+    }
+
+    // Collect all public market orders that match character order IDs.
+    const marketById = new Map<
+      number,
+      { price: number; volumeRemain: number }
+    >();
+    let earliestExpiry: number | undefined;
+
+    await Promise.all(
+      [...byRegion.entries()].flatMap(([regionId, typeIds]) =>
+        [...typeIds].map(async (typeId) => {
+          try {
+            const url =
+              `${ESI_BASE}/markets/${regionId}/orders/?datasource=tranquility` +
+              `&order_type=all&type_id=${typeId}`;
+            const resp = await fetch(url, { cache: "no-cache" });
+            if (!resp.ok) return;
+            const expHeader = resp.headers.get("expires");
+            if (expHeader) {
+              const t = new Date(expHeader).getTime();
+              if (!earliestExpiry || t < earliestExpiry) earliestExpiry = t;
+            }
+            const page = (await resp.json()) as Array<{
+              order_id: number;
+              price: number;
+              volume_remain: number;
+            }>;
+            for (const m of page) {
+              marketById.set(m.order_id, {
+                price: m.price,
+                volumeRemain: m.volume_remain,
+              });
+            }
+          } catch {
+            // non-fatal — stale data is fine
+          }
+        }),
+      ),
+    );
+
+    // Patch open orders in-place and detect fills.
+    let fillDetected = false;
+    this.openOrders.value = this.openOrders.value.map((o) => {
+      const m = marketById.get(o.orderId);
+      if (!m) {
+        // Order not found in the public market — likely filled, cancelled, or expired.
+        fillDetected = true;
+        return o;
+      }
+      if (m.price === o.price && m.volumeRemain === o.volumeRemain) return o;
+      return { ...o, price: m.price, volumeRemain: m.volumeRemain };
+    });
+
+    // Update the displayed expiry time from the market Expires header.
+    if (earliestExpiry !== undefined) this.esiExpiresAt.value = earliestExpiry;
+
+    // Kick off a full character orders poll if a fill/cancel was detected.
+    if (fillDetected && !this.isPolling) {
+      void this.poll();
+      return; // poll() will reschedule everything
+    }
+
+    // Reschedule the next market price refresh.
+    // If no Expires header was received, retry in 30 s rather than stalling indefinitely.
+    const delay = earliestExpiry
+      ? Math.max(5_000, earliestExpiry - Date.now() + 2_000)
+      : 30_000;
+    this.marketPriceTimer = setTimeout(() => {
+      this.marketPriceTimer = undefined;
+      void this.refreshOrderPrices();
+    }, delay);
   }
 
   private scheduleNext(expiresAt?: number): void {
     if (this.pollTimer !== undefined) clearTimeout(this.pollTimer);
-    // Poll right when ESI's cache expires (plus a small buffer), or fall back to 60s.
-    // Note: /characters/{id}/orders caches at 1200s (20 min) — this is an ESI limit.
+    // Poll right when ESI's Expires header says cache is stale.
+    // If the header was absent, retry in 30 s rather than stalling.
     const delay = expiresAt
       ? Math.max(5_000, expiresAt - Date.now() + 2_000)
-      : POLL_INTERVAL_MS;
+      : 30_000;
     this.pollTimer = setTimeout(() => {
       this.pollTimer = undefined;
       void this.poll();
@@ -226,16 +324,10 @@ class OrdersService {
       if (walletRaw !== undefined)
         this.walletBalance.value = walletRaw as number;
 
-      // Use the earliest ESI expiry from the order/wallet endpoints (these cache for ~1 min).
-      // Assets caches for ~20 min so we deliberately exclude it from the poll schedule.
-      const expiresAt = Math.min(
-        ...[rawOpen, rawHistory, rawTxns]
-          .map((r) => r.expiresAt)
-          .filter((t): t is number => t !== undefined),
-      );
-      this.esiExpiresAt.value = Number.isFinite(expiresAt)
-        ? expiresAt
-        : undefined;
+      // Drive the poll schedule from the open-orders endpoint only — it caches for ~5 min.
+      // History caches for ~1h and transactions for ~30 min; including them in Math.min
+      // would cause the schedule to slip to their longer expiry whenever rawOpen has no header.
+      this.esiExpiresAt.value = rawOpen.expiresAt;
 
       // Build avg buy price map from transactions (buy side only, newest first).
       this.updateAvgBuyPrices(rawTxns.data);
@@ -317,6 +409,20 @@ class OrdersService {
       this.isLoading.value = false;
       this.isPolling = false;
       this.scheduleNext(this.esiExpiresAt.value);
+      // Also kick off the 5-min market price refresh (cancels any previous one).
+      if (this.marketPriceTimer !== undefined) {
+        clearTimeout(this.marketPriceTimer);
+        this.marketPriceTimer = undefined;
+      }
+      if (this.openOrders.value.length > 0) {
+        const delay = this.esiExpiresAt.value
+          ? Math.max(5_000, this.esiExpiresAt.value - Date.now() + 2_000)
+          : 30_000;
+        this.marketPriceTimer = setTimeout(() => {
+          this.marketPriceTimer = undefined;
+          void this.refreshOrderPrices();
+        }, delay);
+      }
     }
   }
 
