@@ -369,13 +369,13 @@ function onSortDirChange(event: Event): void {
   }
 
   &--order-buy {
-    background: rgba(100, 200, 255, 0.15);
-    color: #64c8ff;
+    background: rgba(100, 220, 130, 0.15);
+    color: #64dc82;
   }
 
   &--order-sell {
-    background: rgba(255, 140, 100, 0.15);
-    color: #ff8c64;
+    background: rgba(255, 90, 90, 0.15);
+    color: #ff5a5a;
   }
 }
 
