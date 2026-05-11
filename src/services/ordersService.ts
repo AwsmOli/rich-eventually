@@ -167,11 +167,9 @@ class OrdersService {
   private scheduleNext(expiresAt?: number): void {
     if (this.pollTimer !== undefined) clearTimeout(this.pollTimer);
     // Poll right when ESI's cache expires (plus a small buffer), or fall back to 60s.
-    // Cap at 2 min so the UI doesn't show "next update: 20m" — ESI orders cache is 1200s
-    // but we want to stay responsive when the cache expires.
-    const MAX_DELAY_MS = 120_000;
+    // Note: /characters/{id}/orders caches at 1200s (20 min) — this is an ESI limit.
     const delay = expiresAt
-      ? Math.max(5_000, Math.min(MAX_DELAY_MS, expiresAt - Date.now() + 2_000))
+      ? Math.max(5_000, expiresAt - Date.now() + 2_000)
       : POLL_INTERVAL_MS;
     this.pollTimer = setTimeout(() => {
       this.pollTimer = undefined;
@@ -235,10 +233,8 @@ class OrdersService {
           .map((r) => r.expiresAt)
           .filter((t): t is number => t !== undefined),
       );
-      // Cap displayed expiry at 2 min so "next update" never reads more than ~2m.
-      const MAX_POLL_DELAY_MS = 120_000;
       this.esiExpiresAt.value = Number.isFinite(expiresAt)
-        ? Math.min(expiresAt, Date.now() + MAX_POLL_DELAY_MS)
+        ? expiresAt
         : undefined;
 
       // Build avg buy price map from transactions (buy side only, newest first).

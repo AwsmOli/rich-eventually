@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onUnmounted, reactive, ref, watch } from 'vue';
+import { computed, onUnmounted, ref, watch } from 'vue';
 
 import { eveAuthService } from '../../services/eveAuthService';
 import { marketDataService } from '../../services/marketDataService';
@@ -159,9 +159,6 @@ async function copyName(name: string): Promise<void> {
   await navigator.clipboard.writeText(name);
 }
 
-// typeId -> timestamp when user opened the market window (for 5-min "can't update yet" hint)
-const recentUpdates = reactive(new Map<number, number>());
-
 async function openMarket(typeId: number, event: MouseEvent): Promise<void> {
   if (!event.shiftKey || !character.value) return;
   const token = await eveAuthService.getAccessToken();
@@ -170,7 +167,6 @@ async function openMarket(typeId: number, event: MouseEvent): Promise<void> {
     `https://esi.evetech.net/latest/ui/openwindow/marketdetails/?datasource=tranquility&type_id=${typeId}`,
     { method: 'POST', headers: { Authorization: `Bearer ${token}` } },
   );
-  recentUpdates.set(typeId, Date.now());
 }
 </script>
 
@@ -203,7 +199,7 @@ async function openMarket(typeId: number, event: MouseEvent): Promise<void> {
       h3.section-title Open Orders
       .order-group(v-if="openSell.length > 0")
         .group-label Sell
-        .order-row(v-for="o in openSell" :key="o.orderId" :class="{ outbid: outbidMap.has(o.orderId), 'recently-updated': outbidMap.has(o.orderId) && recentUpdates.has(o.typeId) && now - (recentUpdates.get(o.typeId) ?? 0) < 300000 }" :style="{ '--fill-pct': pct(o) + '%' }")
+        .order-row(v-for="o in openSell" :key="o.orderId" :class="{ outbid: outbidMap.has(o.orderId), 'recently-updated': outbidMap.has(o.orderId) && now - new Date(o.issued).getTime() < 300000 }" :style="{ '--fill-pct': pct(o) + '%' }")
           .order-top
             span.order-name(@click="copyName(o.typeName); openMarket(o.typeId, $event)" title="Click to copy · Shift+click to open in market") {{ o.typeName }}
             span.outbid-badge(v-if="outbidMap.has(o.orderId)") {{ outbidMap.get(o.orderId)?.label }}
@@ -216,7 +212,7 @@ async function openMarket(typeId: number, event: MouseEvent): Promise<void> {
               | {{ (o.volumeTotal - o.volumeRemain).toLocaleString() }}/{{ o.volumeTotal.toLocaleString() }}
       .order-group(v-if="openBuy.length > 0")
         .group-label Buy
-        .order-row(v-for="o in openBuy" :key="o.orderId" :class="{ outbid: outbidMap.has(o.orderId), 'recently-updated': outbidMap.has(o.orderId) && recentUpdates.has(o.typeId) && now - (recentUpdates.get(o.typeId) ?? 0) < 300000 }" :style="{ '--fill-pct': pct(o) + '%' }")
+        .order-row(v-for="o in openBuy" :key="o.orderId" :class="{ outbid: outbidMap.has(o.orderId), 'recently-updated': outbidMap.has(o.orderId) && now - new Date(o.issued).getTime() < 300000 }" :style="{ '--fill-pct': pct(o) + '%' }")
           .order-top
             span.order-name(@click="copyName(o.typeName); openMarket(o.typeId, $event)" title="Click to copy · Shift+click to open in market") {{ o.typeName }}
             span.outbid-badge(v-if="outbidMap.has(o.orderId)") {{ outbidMap.get(o.orderId)?.label }}
