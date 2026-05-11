@@ -66,7 +66,17 @@ class StationTradeService {
       }
     }
 
-    // Keep only types that have both sides and a positive after-fee margin.
+    // TypeIds where the character has at least one active order at this hub —
+    // these are always included in results regardless of margin/profit filters
+    // so that active positions remain visible even if competition has compressed the spread.
+    const activeOrderTypeIds = new Set(
+      ordersService.openOrders.value
+        .filter((o) => o.systemId === hub.systemId)
+        .map((o) => o.typeId),
+    );
+
+    // Keep only types that have both market sides and a positive after-fee margin,
+    // OR types where the character already has an active order at this hub.
     const candidateTypeIds: number[] = [];
     for (const [typeId, cheapestSell] of sellByType) {
       const highestBuy = buyByType.get(typeId);
@@ -75,13 +85,16 @@ class StationTradeService {
       const buyCost = highestBuy * (1 + salesTaxRate + brokerFeeRate);
       const sellRevenue = cheapestSell * (1 - salesTaxRate - brokerFeeRate);
       const margin = ((sellRevenue - buyCost) / buyCost) * 100;
-      if (margin < filters.minMarginPercent) continue;
-      const profitPerUnitRaw = sellRevenue - buyCost;
-      if (
-        (filters.minProfitPerUnit ?? 0) > 0 &&
-        profitPerUnitRaw < filters.minProfitPerUnit
-      )
-        continue;
+      // Bypass margin/profit filters for items with active character orders.
+      if (!activeOrderTypeIds.has(typeId)) {
+        if (margin < filters.minMarginPercent) continue;
+        const profitPerUnitRaw = sellRevenue - buyCost;
+        if (
+          (filters.minProfitPerUnit ?? 0) > 0 &&
+          profitPerUnitRaw < filters.minProfitPerUnit
+        )
+          continue;
+      }
       candidateTypeIds.push(typeId);
     }
 
@@ -131,9 +144,11 @@ class StationTradeService {
       );
     }
 
-    // Apply min avg daily trades filter.
+    // Apply min avg daily trades filter (bypassed for items with active character orders).
     const filteredTypeIds = candidateTypeIds.filter(
-      (id) => (avgTradesByType.get(id) ?? 0) >= filters.minAvgDailyTrades,
+      (id) =>
+        activeOrderTypeIds.has(id) ||
+        (avgTradesByType.get(id) ?? 0) >= filters.minAvgDailyTrades,
     );
 
     if (filteredTypeIds.length === 0) return [];
@@ -199,10 +214,11 @@ class StationTradeService {
       });
     }
 
-    // Apply item value filters (cheapestSellPrice used as the item's ISK value).
+    // Apply item value filters — bypassed for items with active character orders.
     const minVal = filters.minItemValue ?? 0;
     const maxVal = filters.maxItemValue ?? 0;
     const filtered = results.filter((r) => {
+      if (activeOrderTypeIds.has(r.typeId)) return true;
       if (minVal > 0 && r.cheapestSellPrice < minVal) return false;
       if (maxVal > 0 && r.cheapestSellPrice > maxVal) return false;
       return true;
