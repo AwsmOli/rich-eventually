@@ -115,9 +115,12 @@ class MarketScannerService {
 
     let expiresAt: number | undefined;
     try {
-      expiresAt = await marketDataService.fetchAndIndexRegion(regionId, (done, total) => {
-        this.fetchProgress.value = { current: done, total };
-      });
+      expiresAt = await marketDataService.fetchAndIndexRegion(
+        regionId,
+        (done, total) => {
+          this.fetchProgress.value = { current: done, total };
+        },
+      );
       this.lastOrdersFetchedAt.value = Date.now();
     } catch {
       // One region failing should not abort the rest.

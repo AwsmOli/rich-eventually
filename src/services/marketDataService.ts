@@ -48,7 +48,10 @@ class MarketDataService {
     GetMarketsRegionIdOrders200Ok[]
   >();
   /** In-flight fetch promises, keyed by regionId — prevents duplicate concurrent fetches. */
-  private readonly regionFetchPromises = new Map<number, Promise<number | undefined>>();
+  private readonly regionFetchPromises = new Map<
+    number,
+    Promise<number | undefined>
+  >();
   /** Cheapest sell price per type per system, built after each full region fetch. */
   private readonly cheapestSellBySystemType = new Map<
     number,
@@ -314,7 +317,10 @@ class MarketDataService {
 
     const fetchOrderType = async (
       orderType: "buy" | "sell",
-    ): Promise<{ orders: GetMarketsRegionIdOrders200Ok[]; expiresAt: number | undefined }> => {
+    ): Promise<{
+      orders: GetMarketsRegionIdOrders200Ok[];
+      expiresAt: number | undefined;
+    }> => {
       const firstResponse = await esiApiService.execute(
         `Fetch ${orderType} orders page 1 for region ${regionId}`,
         () =>
@@ -332,7 +338,9 @@ class MarketDataService {
         10,
       );
       const expiresHeader = firstResponse.raw.headers.get("expires");
-      const expiresAt = expiresHeader ? new Date(expiresHeader).getTime() : undefined;
+      const expiresAt = expiresHeader
+        ? new Date(expiresHeader).getTime()
+        : undefined;
 
       if (orderType === "sell") sellTotal = xPages;
       else buyTotal = xPages;
