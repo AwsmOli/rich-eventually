@@ -64,7 +64,7 @@ const recentlyTraded = computed((): RecentTrade[] => {
   // Keys of sides that still have open orders — suppress those
   const openKeys = new Set(openOrders.value.map((o) => `${o.typeId}-${o.isBuyOrder}`));
 
-  const groups = new Map<string, { orders: CharacterOrder[]; latestClose: number }>();
+  const groups = new Map<string, { orders: CharacterOrder[]; latestClose: number; }>();
   for (const o of orderHistory.value) {
     // Best proxy for "when this order closed" = issued + duration days
     const closedAt = new Date(o.issued).getTime() + (o.duration ?? 0) * 24 * 60 * 60 * 1000;

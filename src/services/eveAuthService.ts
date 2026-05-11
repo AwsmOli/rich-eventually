@@ -87,7 +87,12 @@ class EveAuthService {
     const saved = (await kvGet<CharacterAuth[]>(ACCOUNTS_KEY)) ?? [];
     const activeId = await kvGet<number>(ACTIVE_KEY);
 
-    console.log('[eveAuth] loadAccounts: read from IDB', saved.map(a => a.characterName), 'active:', activeId);
+    console.log(
+      "[eveAuth] loadAccounts: read from IDB",
+      saved.map((a) => a.characterName),
+      "active:",
+      activeId,
+    );
 
     this.accounts.value = saved;
     this.activeCharacterId.value =
@@ -121,9 +126,17 @@ class EveAuthService {
     if (id === undefined) return;
 
     const remaining = this.accounts.value.filter((a) => a.characterId !== id);
-    console.log('[eveAuth] removeCharacter: removing', id, '→ remaining', remaining.map(a => a.characterName));
+    console.log(
+      "[eveAuth] removeCharacter: removing",
+      id,
+      "→ remaining",
+      remaining.map((a) => a.characterName),
+    );
     this.accounts.value = remaining;
-    void kvSet(ACCOUNTS_KEY, remaining.map((a) => toRaw(a)));
+    void kvSet(
+      ACCOUNTS_KEY,
+      remaining.map((a) => toRaw(a)),
+    );
 
     if (this.activeCharacterId.value === id) {
       const next = remaining[0]?.characterId ?? undefined;
@@ -294,9 +307,17 @@ class EveAuthService {
         (a) => a.characterId !== characterId,
       );
       const updated = [...existing, newAuth];
-      console.log('[eveAuth] storeTokens: writing', updated.map(a => a.characterName), 'for', characterName);
+      console.log(
+        "[eveAuth] storeTokens: writing",
+        updated.map((a) => a.characterName),
+        "for",
+        characterName,
+      );
       this.accounts.value = updated;
-      await kvSet(ACCOUNTS_KEY, updated.map((a) => toRaw(a)));
+      await kvSet(
+        ACCOUNTS_KEY,
+        updated.map((a) => toRaw(a)),
+      );
 
       // Make this character active (new login always switches to the added char).
       this.activeCharacterId.value = characterId;
