@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 
 import { characterService, type CharacterSkills } from '../../services/characterService';
 import { eveAuthService } from '../../services/eveAuthService';
@@ -8,24 +8,26 @@ import { marketDataService } from '../../services/marketDataService';
 import { ordersService } from '../../services/ordersService';
 
 const JITA_REGION = 10000002;
+const JITA_SYSTEM = 30000142;
 
 const emit = defineEmits<{
   (event: 'skills-loaded', skills: CharacterSkills): void;
 }>();
 
+const accounts = eveAuthService.accounts;
 const character = eveAuthService.character;
 const walletBalance = ordersService.walletBalance;
 const skills = ref<CharacterSkills | undefined>(undefined);
+const isLoading = ref(false);
 
 const netWorth = computed(() => {
   const wallet = walletBalance.value;
   if (wallet === undefined) return undefined;
-  // Re-run when market data refreshes.
   void marketDataService.marketTick.value;
   const items = ordersService.inventoryItems.value;
   let assetsValue = 0;
   for (const item of items) {
-    const jitaBuy = marketDataService.getHighestBuyPrice(JITA_REGION, item.typeId);
+    const jitaBuy = marketDataService.getHighestBuyPrice(JITA_REGION, item.typeId, JITA_SYSTEM);
     assetsValue += item.qty * (jitaBuy ?? item.avgBuyPrice);
   }
   let sellOrdersValue = 0;
@@ -39,11 +41,11 @@ const netWorth = computed(() => {
   }
   return { total: wallet + assetsValue + sellOrdersValue + escrowValue, wallet, assetsValue, sellOrdersValue, escrowValue };
 });
-const isLoading = ref(false);
 
 async function loadCharacterData(): Promise<void> {
   if (!character.value) return;
   isLoading.value = true;
+  skills.value = undefined;
   try {
     const fetchedSkills = await characterService.getSkills();
     skills.value = fetchedSkills;
@@ -57,26 +59,51 @@ onMounted(() => {
   if (character.value) void loadCharacterData();
 });
 
+watch(() => character.value?.characterId, (newId) => {
+  if (newId !== undefined) void loadCharacterData();
+  else skills.value = undefined;
+});
+
 function login(): void {
   void eveAuthService.login();
 }
 
-function logout(): void {
-  eveAuthService.logout();
-  ordersService.walletBalance.value = undefined;
-  skills.value = undefined;
+function removeCharacter(characterId: number): void {
+  if (characterId === eveAuthService.activeCharacterId.value) {
+    ordersService.walletBalance.value = undefined;
+    skills.value = undefined;
+  }
+  eveAuthService.removeCharacter(characterId);
+}
+
+function switchTo(characterId: number): void {
+  eveAuthService.switchTo(characterId);
 }
 </script>
 
 <template lang="pug">
 .character-panel
-  template(v-if="character")
-    .character-info
-      .portrait-wrap
+  template(v-if="accounts.length === 0")
+    button.login-btn(type="button" @click="login")
+      img.eve-logo(src="https://web.ccpgamescdn.com/eveonlineassets/developers/eve-sso-login-white-large.png" alt="Log in with EVE Online")
+
+  template(v-else)
+    .accounts-row
+      .account-entry(
+        v-for="acc in accounts"
+        :key="acc.characterId"
+        :class="{ 'account-entry--active': acc.characterId === character?.characterId }"
+        @click="switchTo(acc.characterId)"
+        :title="acc.characterName"
+      )
         img.portrait(
-          :src="`https://images.evetech.net/characters/${character.characterId}/portrait?size=64`"
-          :alt="character.characterName"
+          :src="`https://images.evetech.net/characters/${acc.characterId}/portrait?size=64`"
+          :alt="acc.characterName"
         )
+        button.remove-btn(type="button" @click.stop="removeCharacter(acc.characterId)" title="Remove character") ×
+      button.add-btn(type="button" @click="login" title="Add another character") +
+
+    .character-info(v-if="character")
       .details
         .char-name {{ character.characterName }}
         .wallet(v-if="walletBalance !== undefined")
@@ -101,36 +128,103 @@ function logout(): void {
         .skills(v-if="skills")
           span.skill-badge Accounting {{ skills.accounting }}
           span.skill-badge Broker Relations {{ skills.brokerRelations }}
-        .loading-hint(v-else-if="isLoading") Loading character data…
-    button.logout-btn(type="button" @click="logout") Log out
-  template(v-else)
-    button.login-btn(type="button" @click="login")
-      img.eve-logo(src="https://web.ccpgamescdn.com/eveonlineassets/developers/eve-sso-login-white-large.png" alt="Log in with EVE Online")
+        .loading-hint(v-else-if="isLoading") Loading…
 </template>
 
 <style scoped lang="scss">
 .character-panel {
   align-items: center;
   display: flex;
+  flex-wrap: wrap;
   gap: 0.75rem;
 }
 
-.character-info {
+.accounts-row {
   align-items: center;
   display: flex;
-  gap: 0.6rem;
+  flex-wrap: wrap;
+  gap: 0.4rem;
 }
 
-.portrait-wrap {
-  flex-shrink: 0;
+.account-entry {
+  border: 2px solid transparent;
+  border-radius: 0.4rem;
+  cursor: pointer;
+  position: relative;
+  transition: border-color 0.15s;
+
+  &:hover {
+    border-color: #4a6a8a;
+
+    .remove-btn {
+      opacity: 1;
+    }
+  }
+
+  &--active {
+    border-color: #64d7ff;
+  }
 }
 
 .portrait {
-  border: 1px solid #2a3b52;
-  border-radius: 0.4rem;
+  border-radius: 0.25rem;
   display: block;
-  height: 48px;
-  width: 48px;
+  height: 40px;
+  width: 40px;
+}
+
+.remove-btn {
+  background: rgba(10, 18, 28, 0.88);
+  border: none;
+  border-radius: 50%;
+  color: #ff8080;
+  cursor: pointer;
+  font-size: 0.75rem;
+  font-weight: 700;
+  height: 16px;
+  line-height: 16px;
+  opacity: 0;
+  padding: 0;
+  position: absolute;
+  right: -4px;
+  top: -4px;
+  text-align: center;
+  transition: opacity 0.15s;
+  width: 16px;
+
+  &:hover {
+    background: rgba(200, 40, 40, 0.85);
+    color: #fff;
+    opacity: 1;
+  }
+}
+
+.add-btn {
+  align-items: center;
+  background: rgba(100, 180, 255, 0.07);
+  border: 1px dashed #2a4a6a;
+  border-radius: 0.4rem;
+  color: #4a7a9a;
+  cursor: pointer;
+  display: flex;
+  font-size: 1.2rem;
+  font-weight: 300;
+  height: 40px;
+  justify-content: center;
+  line-height: 1;
+  transition: background 0.15s, color 0.15s;
+  width: 40px;
+
+  &:hover {
+    background: rgba(100, 180, 255, 0.14);
+    color: #64d7ff;
+  }
+}
+
+.character-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
 }
 
 .details {
@@ -205,8 +299,8 @@ function logout(): void {
 
 .skills {
   display: flex;
-  gap: 0.3rem;
   flex-wrap: wrap;
+  gap: 0.3rem;
 }
 
 .skill-badge {
@@ -221,20 +315,6 @@ function logout(): void {
 .loading-hint {
   color: #5e7a99;
   font-size: 0.75rem;
-}
-
-.logout-btn {
-  background: rgba(255, 100, 100, 0.1);
-  border: 1px solid rgba(255, 100, 100, 0.3);
-  border-radius: 0.4rem;
-  color: #ff9999;
-  cursor: pointer;
-  font-size: 0.75rem;
-  padding: 0.3rem 0.65rem;
-
-  &:hover {
-    background: rgba(255, 100, 100, 0.2);
-  }
 }
 
 .login-btn {

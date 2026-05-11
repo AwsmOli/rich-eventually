@@ -9,6 +9,7 @@ type SortField = 'marginPercent' | 'profitPerUnit' | 'avgDailyTrades' | 'tradeVo
 type SortDir = 'asc' | 'desc';
 
 const LS_KEY = 'rich-eventually:pinned-trades';
+const LS_HIDDEN_KEY = 'rich-eventually:hidden-trades';
 
 const SORT_OPTIONS: { value: SortField; label: string; }[] = [
   { value: 'tradeVolumeIsk', label: 'ISK Volume' },
@@ -82,6 +83,44 @@ function togglePin(row: StationTradeOpportunity): void {
 
 const pinnedTypeIds = computed(() => new Set(pinnedItems.value.keys()));
 
+// ── Hidden state ─────────────────────────────────────────────────────────────
+
+function loadHidden(): Set<number> {
+  try {
+    const raw = localStorage.getItem(LS_HIDDEN_KEY);
+    if (!raw) return new Set();
+    return new Set(JSON.parse(raw) as number[]);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveHidden(set: Set<number>): void {
+  localStorage.setItem(LS_HIDDEN_KEY, JSON.stringify([...set]));
+}
+
+const hiddenTypeIds = ref<Set<number>>(loadHidden());
+const showHidden = ref(false);
+
+function toggleHide(typeId: number): void {
+  const next = new Set(hiddenTypeIds.value);
+  if (next.has(typeId)) {
+    next.delete(typeId);
+  } else {
+    next.add(typeId);
+    // Unpin if hiding
+    const pinMap = new Map(pinnedItems.value);
+    if (pinMap.delete(typeId)) {
+      pinnedItems.value = pinMap;
+      savePinned(pinMap);
+    }
+  }
+  hiddenTypeIds.value = next;
+  saveHidden(next);
+}
+
+const hiddenCount = computed(() => hiddenTypeIds.value.size);
+
 // ── Sorted rows ──────────────────────────────────────────────────────────────
 // Pinned rows always appear first (using fresh data if available, else cached).
 // Unpinned rows are sorted by the selected field.
@@ -92,12 +131,12 @@ const sortedRows = computed(() => {
 
   const liveByType = new Map(props.rows.map((r) => [r.typeId, r]));
 
-  const pinnedRows = [...pinnedItems.value.keys()].map(
-    (id) => liveByType.get(id) ?? pinnedItems.value.get(id)!,
-  );
+  const pinnedRows = [...pinnedItems.value.keys()]
+    .filter((id) => showHidden.value || !hiddenTypeIds.value.has(id))
+    .map((id) => liveByType.get(id) ?? pinnedItems.value.get(id)!);
 
   const unpinned = props.rows
-    .filter((r) => !pinnedTypeIds.value.has(r.typeId))
+    .filter((r) => !pinnedTypeIds.value.has(r.typeId) && (showHidden.value || !hiddenTypeIds.value.has(r.typeId)))
     .sort((a, b) => {
       const av = a[field] ?? -Infinity;
       const bv = b[field] ?? -Infinity;
@@ -135,7 +174,7 @@ function onSortDirChange(event: Event): void {
 
 <template lang="pug">
 .table-card
-  .controls(v-if="sortedRows.length > 0 || rows.length > 0")
+  .controls(v-if="sortedRows.length > 0 || rows.length > 0 || hiddenCount > 0")
     label.sort-label Sort by
     select.sort-select(:value="sortField" @change="onSortChange")
       option(v-for="opt in SORT_OPTIONS" :key="opt.value" :value="opt.value") {{ opt.label }}
@@ -143,6 +182,8 @@ function onSortDirChange(event: Event): void {
     select.sort-select(:value="sortDir" @change="onSortDirChange")
       option(value="desc") ↓ High → Low
       option(value="asc") ↑ Low → High
+    button.show-hidden-btn(v-if="hiddenCount > 0" type="button" @click="showHidden = !showHidden" :class="{ active: showHidden }")
+      | {{ showHidden ? '👁 Hide hidden' : `👁 Show hidden (${hiddenCount})` }}
   .loading(v-if="isLoading") Scanning station orders…
   .empty(v-else-if="sortedRows.length === 0") No station trading opportunities found for the current filters.
   .tbl-wrap(v-else)
@@ -157,7 +198,7 @@ function onSortDirChange(event: Event): void {
           th 90d avg price
           th vs 90d avg
       tbody
-        tr(:class="['trow', { 'trow--pinned': pinnedTypeIds.has(row.typeId), 'trow--has-inventory': row.hasInventory, 'trow--has-order': row.hasOpenOrder }]" v-for="row in sortedRows" :key="row.typeId")
+        tr(:class="['trow', { 'trow--pinned': pinnedTypeIds.has(row.typeId), 'trow--hidden': hiddenTypeIds.has(row.typeId), 'trow--has-inventory': row.hasInventory, 'trow--has-order': row.hasOpenOrder }]" v-for="row in sortedRows" :key="row.typeId")
           td.td-name
             .name-row
               button.item-name(type="button" @click="copy(row.itemName); openMarket(row.typeId, $event)" title="Click to copy · Shift+click to open in market") {{ row.itemName }}
@@ -165,6 +206,7 @@ function onSortDirChange(event: Event): void {
                 span.badge.badge--inventory(v-if="row.hasInventory" title="You own this item") own
                 span.badge.badge--order(v-if="row.hasOpenOrder" title="You have an active order") ord
                 button.pin-btn(:class="{ active: pinnedTypeIds.has(row.typeId) }" type="button" @click.stop="togglePin(row)" :title="pinnedTypeIds.has(row.typeId) ? 'Unpin from top' : 'Pin to top'") 📌
+                button.hide-btn(:class="{ active: hiddenTypeIds.has(row.typeId) }" type="button" @click.stop="toggleHide(row.typeId)" :title="hiddenTypeIds.has(row.typeId) ? 'Unhide' : 'Hide'") 🙈
           td(data-label="Buy / Sell")
             .price-pair
               .price-line
@@ -331,6 +373,29 @@ function onSortDirChange(event: Event): void {
   }
 }
 
+.show-hidden-btn {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid #33455f;
+  border-radius: 0.4rem;
+  color: #7a94b2;
+  cursor: pointer;
+  font-size: 0.78rem;
+  margin-left: auto;
+  padding: 0.25rem 0.55rem;
+  transition: background 0.15s, color 0.15s;
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.09);
+    color: #ecf4ff;
+  }
+
+  &.active {
+    background: rgba(255, 180, 50, 0.12);
+    border-color: rgba(255, 180, 50, 0.4);
+    color: #ffd96a;
+  }
+}
+
 .pin-btn {
   background: none;
   border: none;
@@ -361,6 +426,29 @@ function onSortDirChange(event: Event): void {
 
 .trow--has-inventory:not(.trow--pinned) td.td-name {
   border-left: 3px solid rgba(125, 255, 155, 0.45);
+}
+
+.hide-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.8rem;
+  line-height: 1;
+  opacity: 0.22;
+  padding: 0;
+  transition: opacity 0.15s;
+
+  &:hover {
+    opacity: 0.65;
+  }
+
+  &.active {
+    opacity: 1;
+  }
+}
+
+.trow--hidden td {
+  opacity: 0.4;
 }
 
 .trow--has-order:not(.trow--pinned):not(.trow--has-inventory) td.td-name {

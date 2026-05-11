@@ -205,8 +205,8 @@ function sortedItems(items: EnrichedItem[]): EnrichedItem[] {
       case 'avgBuyPrice': return dir * (a.avgBuyPrice - b.avgBuyPrice);
       case 'totalCost': return dir * (a.totalCost - b.totalCost);
       case 'jitaValue': {
-        const va = (marketDataService.getHighestBuyPrice(JITA_REGION, a.typeId) ?? a.avgBuyPrice) * a.qty;
-        const vb = (marketDataService.getHighestBuyPrice(JITA_REGION, b.typeId) ?? b.avgBuyPrice) * b.qty;
+        const va = (marketDataService.getHighestBuyPrice(JITA_REGION, a.typeId, JITA_SYSTEM) ?? a.avgBuyPrice) * a.qty;
+        const vb = (marketDataService.getHighestBuyPrice(JITA_REGION, b.typeId, JITA_SYSTEM) ?? b.avgBuyPrice) * b.qty;
         return dir * (va - vb);
       }
       case 'avgMarketPrice': return dir * ((a.avgMarketPrice ?? -Infinity) - (b.avgMarketPrice ?? -Infinity));
@@ -231,11 +231,12 @@ const visibleItems = computed(() => {
 });
 
 const JITA_REGION = 10000002;
+const JITA_SYSTEM = 30000142;
 
 function jitaValue(items: EnrichedItem[]): number {
   void marketDataService.marketTick.value;
   return items.reduce((s, i) => {
-    const price = marketDataService.getHighestBuyPrice(JITA_REGION, i.typeId) ?? i.avgBuyPrice;
+    const price = marketDataService.getHighestBuyPrice(JITA_REGION, i.typeId, JITA_SYSTEM) ?? i.avgBuyPrice;
     return s + i.qty * price;
   }, 0);
 }

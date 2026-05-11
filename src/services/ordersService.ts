@@ -11,9 +11,10 @@
  * Polling interval: every 60 seconds while a character is authenticated.
  */
 
-import { ref } from "vue";
+import { ref, watch } from "vue";
 
 import { eveAuthService } from "./eveAuthService";
+import { kvGet, kvSet } from "./idbService";
 import { toastService } from "./toastService";
 
 const ESI_BASE = "https://esi.evetech.net/latest";
@@ -39,6 +40,7 @@ export interface CharacterOrder {
   volumeTotal: number;
   volumeRemain: number;
   locationId: number;
+  systemId: number;
   regionId: number;
   issued: string; // ISO date
   /** Only on open orders */
@@ -90,6 +92,8 @@ class OrdersService {
   public readonly esiExpiresAt = ref<number | undefined>(undefined);
   /** Character wallet balance in ISK — updated every poll. */
   public readonly walletBalance = ref<number | undefined>(undefined);
+  /** Raw wallet transactions (buy + sell) — updated every poll. */
+  public readonly walletTransactions = ref<WalletTransaction[]>([]);
   /** Total cost basis of all enriched inventory items — set by AssetsTab after enrichment. */
   public readonly totalAssetsValue = ref<number | undefined>(undefined);
 
@@ -120,6 +124,30 @@ class OrdersService {
         }
       }
     });
+
+    // When the active character changes (switch or logout), clear stale data
+    // and restart polling for the new character.
+    watch(
+      () => eveAuthService.character.value?.characterId,
+      async (newId, oldId) => {
+        if (newId === oldId) return;
+        this.stopPolling();
+        this.openOrders.value = [];
+        this.orderHistory.value = [];
+        this.inventoryItems.value = [];
+        this.walletBalance.value = undefined;
+        this.walletTransactions.value = [];
+        this.prevStates.clear();
+        if (newId !== undefined) {
+          // Restore previously-cached history so Journal isn't empty while the poll runs.
+          const cached = await kvGet<CharacterOrder[]>(
+            `order-history-${newId}`,
+          );
+          if (cached) this.orderHistory.value = cached;
+          void this.poll();
+        }
+      },
+    );
   }
 
   // Vue `ref` doesn't expose `.subscribe` — watch via a micro-approach instead.
@@ -209,6 +237,15 @@ class OrdersService {
 
       // Build avg buy price map from transactions (buy side only, newest first).
       this.updateAvgBuyPrices(rawTxns.data);
+      this.walletTransactions.value = rawTxns.data.map((t) => ({
+        transactionId: t.transaction_id,
+        typeId: t.type_id,
+        isBuy: t.is_buy,
+        unitPrice: t.unit_price,
+        quantity: t.quantity,
+        date: t.date,
+        locationId: t.location_id,
+      }));
 
       // Collect all typeIds that need names.
       const allTypeIds = new Set<number>([
@@ -252,6 +289,7 @@ class OrdersService {
 
       this.openOrders.value = newOpen;
       this.orderHistory.value = newHistory;
+      void kvSet(`order-history-${characterId}`, newHistory);
       this.inventoryItems.value = this.computeInventoryFromAssets(
         rawAssets.data,
         rawTxns.data,
@@ -263,6 +301,14 @@ class OrdersService {
         0,
       );
       this.lastUpdatedAt.value = Date.now();
+
+      // Persist a net-worth snapshot (wallet + cost-basis inventory) to IDB.
+      // One snapshot per day; older than 90 days are pruned.
+      if (walletRaw !== undefined) {
+        const wallet = walletRaw as number;
+        const assets = this.totalAssetsValue.value ?? 0;
+        void this.saveNetworthSnapshot(wallet + assets);
+      }
     } catch (err) {
       console.error("Orders poll failed:", err);
     } finally {
@@ -505,6 +551,7 @@ class OrdersService {
       volumeTotal: o.volume_total,
       volumeRemain: o.volume_remain,
       locationId: o.location_id,
+      systemId: o.system_id,
       regionId: o.region_id,
       issued: o.issued,
       duration: o.duration,
@@ -515,7 +562,8 @@ class OrdersService {
   private mapHistory(o: EsiHistoryOrder): CharacterOrder {
     const filled = o.volume_total - (o.volume_remain ?? 0);
     let estimatedProfit: number | undefined;
-    if (!o.is_buy_order && o.state === "closed" && filled > 0) {
+    // Compute profit for any sell order that had volume filled (closed, expired, or cancelled).
+    if (!o.is_buy_order && filled > 0) {
       const avgBuy = this.avgBuyPrice.get(o.type_id);
       if (avgBuy !== undefined) {
         estimatedProfit = (o.price - avgBuy) * filled;
@@ -530,6 +578,7 @@ class OrdersService {
       volumeTotal: o.volume_total,
       volumeRemain: o.volume_remain ?? 0,
       locationId: o.location_id,
+      systemId: 0, // ESI history orders don't include system_id
       regionId: o.region_id,
       issued: o.issued,
       state: o.state,
@@ -629,6 +678,22 @@ class OrdersService {
     return { data: [first, ...rest].flat(), expiresAt };
   }
 
+  private async saveNetworthSnapshot(value: number): Promise<void> {
+    const today = new Date().toISOString().slice(0, 10); // "YYYY-MM-DD"
+    const key = "networth-snapshots";
+    const existing =
+      (await kvGet<Array<{ date: string; value: number }>>(key)) ?? [];
+    // Update today's entry or append; keep latest 90 days.
+    const idx = existing.findIndex((s) => s.date === today);
+    if (idx >= 0) {
+      existing[idx].value = value;
+    } else {
+      existing.push({ date: today, value });
+    }
+    const pruned = existing.slice(-90);
+    await kvSet(key, pruned);
+  }
+
   public onAuthChange(): void {
     if (eveAuthService.character.value) {
       this.startPolling();
@@ -664,6 +729,7 @@ interface EsiOrder {
   issued: string;
   duration: number;
   escrow?: number;
+  system_id: number;
 }
 
 interface EsiHistoryOrder {

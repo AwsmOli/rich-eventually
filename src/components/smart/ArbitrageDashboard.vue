@@ -15,17 +15,19 @@ import ArbitrageTable from '../presentational/ArbitrageTable.vue';
 import AssetsTab from './AssetsTab.vue';
 import CharacterPanel from './CharacterPanel.vue';
 import FilterPanel from '../presentational/FilterPanel.vue';
+import JournalTab from './JournalTab.vue';
 import OrdersPanel from './OrdersPanel.vue';
 import StationTradeFilterPanel from '../presentational/StationTradeFilterPanel.vue';
 import StationTradeTable from '../presentational/StationTradeTable.vue';
 
-type Tab = 'arbitrage' | 'station' | 'assets' | 'orders';
+type Tab = 'arbitrage' | 'station' | 'assets' | 'orders' | 'journal';
 
 function tabFromHash(): Tab {
   const hash = window.location.hash.slice(1);
   if (hash === 'station') return 'station';
   if (hash === 'assets') return 'assets';
   if (hash === 'orders') return 'orders';
+  if (hash === 'journal') return 'journal';
   return 'arbitrage';
 }
 
@@ -235,6 +237,7 @@ async function copyText(text: string): Promise<void> {
     button.tab(:class="{ active: activeTab === 'arbitrage' }" @click="activeTab = 'arbitrage'") Hauling
     button.tab(:class="{ active: activeTab === 'station' }" @click="activeTab = 'station'") Station
     button.tab(:class="{ active: activeTab === 'assets' }" @click="activeTab = 'assets'") Assets
+    button.tab(:class="{ active: activeTab === 'journal' }" @click="activeTab = 'journal'") Journal
     button.tab.orders-tab-mobile(
       v-if="eveAuthService.character.value"
       :class="{ active: activeTab === 'orders' }"
@@ -314,6 +317,8 @@ async function copyText(text: string): Promise<void> {
           )
       template(v-if="activeTab === 'assets'")
         AssetsTab
+      template(v-if="activeTab === 'journal'")
+        JournalTab
 </template>
 
 <style scoped lang="scss">

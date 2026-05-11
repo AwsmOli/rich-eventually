@@ -544,30 +544,36 @@ class MarketDataService {
     }
   }
 
-  /** Returns the highest buy-order price for a type in a region (sync, uses in-memory cache). */
+  /** Returns the highest buy-order price for a type in a region (sync, uses in-memory cache).
+   * Pass systemId to restrict to orders physically located in that system. */
   public getHighestBuyPrice(
     regionId: number,
     typeId: number,
+    systemId?: number,
   ): number | undefined {
     const orders = this.regionOrderCache.get(regionId) ?? [];
     let highest: number | undefined;
     for (const o of orders) {
       if (o.typeId === typeId && o.isBuyOrder) {
+        if (systemId !== undefined && o.systemId !== systemId) continue;
         if (highest === undefined || o.price > highest) highest = o.price;
       }
     }
     return highest;
   }
 
-  /** Returns the lowest sell-order price for a type in a region (sync, uses in-memory cache). */
+  /** Returns the lowest sell-order price for a type in a region (sync, uses in-memory cache).
+   * Pass systemId to restrict to orders physically located in that system. */
   public getLowestSellPrice(
     regionId: number,
     typeId: number,
+    systemId?: number,
   ): number | undefined {
     const orders = this.regionOrderCache.get(regionId) ?? [];
     let lowest: number | undefined;
     for (const o of orders) {
       if (o.typeId === typeId && !o.isBuyOrder) {
+        if (systemId !== undefined && o.systemId !== systemId) continue;
         if (lowest === undefined || o.price < lowest) lowest = o.price;
       }
     }

@@ -67,11 +67,11 @@ const outbidMap = computed(() => {
   const map = new Map<number, OutbidInfo>();
   for (const o of openOrders.value) {
     if (!o.isBuyOrder) {
-      const best = marketDataService.getLowestSellPrice(o.regionId, o.typeId);
+      const best = marketDataService.getLowestSellPrice(o.regionId, o.typeId, o.systemId);
       if (best !== undefined && best < o.price)
         map.set(o.orderId, { label: 'UNDERCUT', competitorPrice: best });
     } else {
-      const best = marketDataService.getHighestBuyPrice(o.regionId, o.typeId);
+      const best = marketDataService.getHighestBuyPrice(o.regionId, o.typeId, o.systemId);
       if (best !== undefined && best > o.price)
         map.set(o.orderId, { label: 'OUTBID', competitorPrice: best });
     }
