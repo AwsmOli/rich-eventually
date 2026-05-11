@@ -124,8 +124,4 @@ export interface StationTradeOpportunity {
   vsAvg90d: number | undefined; // (midpoint - avg90dPrice) / avg90dPrice as fraction
   /** True if the character currently has this item in their inventory. */
   hasInventory: boolean;
-  /** True if the character has an open buy order for this item. */
-  hasOpenBuyOrder: boolean;
-  /** True if the character has an open sell order for this item. */
-  hasOpenSellOrder: boolean;
 }

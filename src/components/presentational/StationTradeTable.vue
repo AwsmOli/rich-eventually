@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue';
 
 import { eveAuthService } from '../../services/eveAuthService';
+import { ordersService } from '../../services/ordersService';
 import type { StationTradeOpportunity } from '../../types/domain';
 import IskValue from './IskValue.vue';
 
@@ -121,6 +122,14 @@ function toggleHide(typeId: number): void {
 
 const hiddenCount = computed(() => hiddenTypeIds.value.size);
 
+// Live sets of typeIds with open buy/sell orders — updates reactively with ordersService.
+const openBuyTypeIds = computed(
+  () => new Set(ordersService.openOrders.value.filter((o) => o.isBuyOrder).map((o) => o.typeId)),
+);
+const openSellTypeIds = computed(
+  () => new Set(ordersService.openOrders.value.filter((o) => !o.isBuyOrder).map((o) => o.typeId)),
+);
+
 // ── Sorted rows ──────────────────────────────────────────────────────────────
 // Pinned rows always appear first (using fresh data if available, else cached).
 // Unpinned rows are sorted by the selected field.
@@ -198,14 +207,14 @@ function onSortDirChange(event: Event): void {
           th 90d avg price
           th vs 90d avg
       tbody
-        tr(:class="['trow', { 'trow--pinned': pinnedTypeIds.has(row.typeId), 'trow--hidden': hiddenTypeIds.has(row.typeId), 'trow--has-inventory': row.hasInventory, 'trow--has-order': row.hasOpenBuyOrder || row.hasOpenSellOrder }]" v-for="row in sortedRows" :key="row.typeId")
+        tr(:class="['trow', { 'trow--pinned': pinnedTypeIds.has(row.typeId), 'trow--hidden': hiddenTypeIds.has(row.typeId), 'trow--has-inventory': row.hasInventory, 'trow--has-order': openBuyTypeIds.has(row.typeId) || openSellTypeIds.has(row.typeId) }]" v-for="row in sortedRows" :key="row.typeId")
           td.td-name
             .name-row
               button.item-name(type="button" @click="copy(row.itemName); openMarket(row.typeId, $event)" title="Click to copy · Shift+click to open in market") {{ row.itemName }}
               .row-badges
                 span.badge.badge--inventory(v-if="row.hasInventory" title="You own this item") own
-                span.badge.badge--order-buy(v-if="row.hasOpenBuyOrder" title="You have an open buy order") B
-                span.badge.badge--order-sell(v-if="row.hasOpenSellOrder" title="You have an open sell order") S
+                span.badge.badge--order-buy(v-if="openBuyTypeIds.has(row.typeId)" title="You have an open buy order") B
+                span.badge.badge--order-sell(v-if="openSellTypeIds.has(row.typeId)" title="You have an open sell order") S
                 button.pin-btn(:class="{ active: pinnedTypeIds.has(row.typeId) }" type="button" @click.stop="togglePin(row)" :title="pinnedTypeIds.has(row.typeId) ? 'Unpin from top' : 'Pin to top'") 📌
                 button.hide-btn(:class="{ active: hiddenTypeIds.has(row.typeId) }" type="button" @click.stop="toggleHide(row.typeId)" :title="hiddenTypeIds.has(row.typeId) ? 'Unhide' : 'Hide'") 🙈
           td(data-label="Buy / Sell")
