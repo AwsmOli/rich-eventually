@@ -52,6 +52,7 @@ class StationTradeService {
     // Filter to this system only, then split into buy / sell sides.
     const buyByType = new Map<number, number>(); // typeId → highest buy price
     const sellByType = new Map<number, number>(); // typeId → cheapest sell price
+    const sellVolumeByType = new Map<number, number>(); // typeId → realistic sell volume at hub
 
     for (const order of regionOrders) {
       if (order.systemId !== hub.systemId) continue;
@@ -63,6 +64,17 @@ class StationTradeService {
         const cur = sellByType.get(order.typeId);
         if (cur === undefined || order.price < cur)
           sellByType.set(order.typeId, order.price);
+      }
+    }
+
+    // Second pass: sum sell volume only for orders within 2× the cheapest price.
+    // This excludes "crazy high" placeholder orders that nobody would buy.
+    for (const order of regionOrders) {
+      if (order.systemId !== hub.systemId || order.isBuyOrder) continue;
+      const cheapest = sellByType.get(order.typeId);
+      if (cheapest === undefined) continue;
+      if (order.price <= cheapest * 2) {
+        sellVolumeByType.set(order.typeId, (sellVolumeByType.get(order.typeId) ?? 0) + order.volumeRemain);
       }
     }
 
@@ -196,6 +208,9 @@ class StationTradeService {
         avg90dPrice !== undefined && avg90dPrice > 0
           ? (midpoint - avg90dPrice) / avg90dPrice
           : undefined;
+      const sellVolume = sellVolumeByType.get(typeId) ?? 0;
+      const daysOfSupply =
+        avgDailyTrades > 0 ? sellVolume / avgDailyTrades : undefined;
 
       results.push({
         typeId,
@@ -208,6 +223,7 @@ class StationTradeService {
         tradeVolumeIsk: avgDailyTrades * highestBuy,
         avg90dPrice,
         vsAvg90d,
+        daysOfSupply,
         hasInventory: ordersService.inventoryItems.value.some(
           (i) => i.typeId === typeId,
         ),

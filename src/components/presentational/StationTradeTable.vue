@@ -6,7 +6,7 @@ import { ordersService } from '../../services/ordersService';
 import type { StationTradeOpportunity } from '../../types/domain';
 import IskValue from './IskValue.vue';
 
-type SortField = 'marginPercent' | 'profitPerUnit' | 'avgDailyTrades' | 'tradeVolumeIsk' | 'cheapestSellPrice' | 'vsAvg90d';
+type SortField = 'marginPercent' | 'profitPerUnit' | 'avgDailyTrades' | 'tradeVolumeIsk' | 'cheapestSellPrice' | 'vsAvg90d' | 'daysOfSupply';
 type SortDir = 'asc' | 'desc';
 
 const LS_KEY = 'rich-eventually:pinned-trades';
@@ -19,6 +19,7 @@ const SORT_OPTIONS: { value: SortField; label: string; }[] = [
   { value: 'avgDailyTrades', label: 'Daily Trades' },
   { value: 'cheapestSellPrice', label: 'Sell Price' },
   { value: 'vsAvg90d', label: 'vs 90d Avg' },
+  { value: 'daysOfSupply', label: 'Days of Supply' },
 ];
 
 const props = defineProps<{
@@ -204,6 +205,7 @@ function onSortDirChange(event: Event): void {
           th Margin / Profit
           th Daily / ISK vol
           th 90d avg
+          th Days of Supply
       tbody
         tr(:class="['trow', { 'trow--pinned': pinnedTypeIds.has(row.typeId), 'trow--hidden': hiddenTypeIds.has(row.typeId), 'trow--has-inventory': row.hasInventory, 'trow--has-order': openBuyTypeIds.has(row.typeId) || openSellTypeIds.has(row.typeId) }]" v-for="row in sortedRows" :key="row.typeId")
           td.td-name
@@ -248,6 +250,11 @@ function onSortDirChange(event: Event): void {
                   span(:class="row.vsAvg90d > 0 ? 'positive' : row.vsAvg90d < 0 ? 'negative' : 'neutral'")
                     | {{ row.vsAvg90d > 0 ? '+' : '' }}{{ (row.vsAvg90d * 100).toFixed(1) }}%
                 template(v-else) —
+          td(data-label="Days of Supply")
+            template(v-if="row.daysOfSupply !== undefined")
+              span(:class="row.daysOfSupply < 3 ? 'positive' : row.daysOfSupply < 14 ? 'neutral' : 'negative'")
+                | {{ row.daysOfSupply.toFixed(1) }}d
+            template(v-else) —
 </template>
 
 <style scoped lang="scss">

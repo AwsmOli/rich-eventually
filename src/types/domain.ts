@@ -122,6 +122,8 @@ export interface StationTradeOpportunity {
   tradeVolumeIsk: number; // avgDailyTrades × highestBuyPrice (rough ISK volume)
   avg90dPrice: number | undefined; // 90-day average transaction price
   vsAvg90d: number | undefined; // (midpoint - avg90dPrice) / avg90dPrice as fraction
+  /** Total sell-order volume at the hub ÷ avg daily trades (days until supply is exhausted). */
+  daysOfSupply: number | undefined;
   /** True if the character currently has this item in their inventory. */
   hasInventory: boolean;
 }
