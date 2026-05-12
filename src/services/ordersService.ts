@@ -130,7 +130,9 @@ class OrdersService {
     // prices from the in-memory cache — no extra ESI calls needed.
     watch(
       () => marketDataService.marketTick.value,
-      () => { this.patchPricesFromCache(); },
+      () => {
+        this.patchPricesFromCache();
+      },
     );
 
     // When the active character changes (switch or logout), clear stale data
