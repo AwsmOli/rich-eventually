@@ -77,7 +77,11 @@ class MarketDataService {
   /** In-memory summary cache — avoids re-parsing localStorage on repeated calls. */
   private readonly summaryCacheMemory = new Map<
     string,
-    { avgOrderCount: number; avgPrice: number | undefined; avgVolume: number | undefined }
+    {
+      avgOrderCount: number;
+      avgPrice: number | undefined;
+      avgVolume: number | undefined;
+    }
   >();
   private readonly TYPE_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
   /** Always resolves immediately — retained for API compatibility with marketScannerService. */
@@ -215,7 +219,13 @@ class MarketDataService {
   public getHistorySummarySync(
     regionId: number,
     typeId: number,
-  ): { avgOrderCount: number; avgPrice: number | undefined; avgVolume: number | undefined } | undefined {
+  ):
+    | {
+        avgOrderCount: number;
+        avgPrice: number | undefined;
+        avgVolume: number | undefined;
+      }
+    | undefined {
     // In-memory summary cache (populated by getHistorySummary calls in this session).
     const memKey = `${regionId}:${typeId}`;
     const mem = this.summaryCacheMemory.get(memKey);
@@ -229,7 +239,11 @@ class MarketDataService {
   public async getHistorySummary(
     regionId: number,
     typeId: number,
-  ): Promise<{ avgOrderCount: number; avgPrice: number | undefined; avgVolume: number | undefined }> {
+  ): Promise<{
+    avgOrderCount: number;
+    avgPrice: number | undefined;
+    avgVolume: number | undefined;
+  }> {
     // Check in-memory cache first (populated this session).
     const memKey = `${regionId}:${typeId}`;
     const mem = this.summaryCacheMemory.get(memKey);
@@ -241,7 +255,8 @@ class MarketDataService {
       if (record !== undefined && record.expiresAt > Date.now()) {
         // Treat old records that have avgPrice but no avgVolume as stale —
         // they were cached before avgVolume was tracked and must be re-fetched.
-        const isOldFormat = record.avgPrice !== undefined && record.avgVolume === undefined;
+        const isOldFormat =
+          record.avgPrice !== undefined && record.avgVolume === undefined;
         if (!isOldFormat) {
           const result = {
             avgOrderCount: record.avgOrderCount,

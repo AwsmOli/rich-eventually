@@ -94,7 +94,10 @@ class MarketScannerService {
     this.scheduled.clear();
     let delay = 0;
     for (const regionId of MAJOR_REGIONS) {
-      if (!this.activeRegions.has(regionId) && !this.pausedRegions.value.has(regionId)) {
+      if (
+        !this.activeRegions.has(regionId) &&
+        !this.pausedRegions.value.has(regionId)
+      ) {
         this.scheduleRegion(regionId, delay, /* manual */ true);
         delay += INITIAL_STAGGER_MS;
       }
@@ -173,7 +176,11 @@ class MarketScannerService {
     }
   }
 
-  private scheduleRegion(regionId: number, delayMs: number, manual = false): void {
+  private scheduleRegion(
+    regionId: number,
+    delayMs: number,
+    manual = false,
+  ): void {
     const existing = this.scheduled.get(regionId);
     if (existing !== undefined) clearTimeout(existing.id);
 
@@ -196,7 +203,11 @@ class MarketScannerService {
     await this.fetchQueue;
   }
 
-  private async doRefreshRegion(regionId: number, gen: number, manual = false): Promise<void> {
+  private async doRefreshRegion(
+    regionId: number,
+    gen: number,
+    manual = false,
+  ): Promise<void> {
     // Skip work that was queued before the last wake/forceRefresh cycle.
     if (gen !== this.generation) return;
 
@@ -204,7 +215,11 @@ class MarketScannerService {
     await esiApiService.waitIfPaused();
 
     // Skip if auto-update is off (unless this is a manual refresh) or region is paused.
-    if ((!manual && !this.autoUpdate.value) || this.pausedRegions.value.has(regionId)) return;
+    if (
+      (!manual && !this.autoUpdate.value) ||
+      this.pausedRegions.value.has(regionId)
+    )
+      return;
 
     this.activeRegions.add(regionId);
     this.isFetchingOrders.value = true;

@@ -544,7 +544,9 @@ class ManufacturingService {
           uncached.push(id);
         }
       }
-      console.log(`[mfg/scan] ${materialMap.size} from cache, ${uncached.length} need Fuzzwork`);
+      console.log(
+        `[mfg/scan] ${materialMap.size} from cache, ${uncached.length} need Fuzzwork`,
+      );
 
       // Async batches only for the uncached subset.
       // Capture cachedCount before the loop so it doesn't grow with materialMap.
@@ -612,11 +614,18 @@ class ManufacturingService {
         for (const [bpTypeId, rec] of materialMap) {
           if (!rec || rec.materials.length === 0) continue;
           const owned = bestByType.has(bpTypeId);
-          if (!owned && (bpTypeId === rec.productTypeId || marketDataService.getLowestSellPrice(regionId, bpTypeId) === undefined)) continue;
+          if (
+            !owned &&
+            (bpTypeId === rec.productTypeId ||
+              marketDataService.getLowestSellPrice(regionId, bpTypeId) ===
+                undefined)
+          )
+            continue;
           candidateProductIds.add(rec.productTypeId);
         }
         const needsHistory = [...candidateProductIds].filter(
-          (id) => marketDataService.getHistorySummarySync(regionId, id) === undefined,
+          (id) =>
+            marketDataService.getHistorySummarySync(regionId, id) === undefined,
         );
         if (needsHistory.length > 0) {
           this.progress.value = {
@@ -627,9 +636,9 @@ class ManufacturingService {
           const HIST_BATCH = 40;
           for (let i = 0; i < needsHistory.length; i += HIST_BATCH) {
             await Promise.all(
-              needsHistory.slice(i, i + HIST_BATCH).map((id) =>
-                marketDataService.getHistorySummary(regionId, id),
-              ),
+              needsHistory
+                .slice(i, i + HIST_BATCH)
+                .map((id) => marketDataService.getHistorySummary(regionId, id)),
             );
             this.progress.value = {
               step: "Fetching price history…",
@@ -662,7 +671,11 @@ class ManufacturingService {
 
           // Also skip if the blueprint itself has no sell orders in the region
           // (removed from game, contract-only, etc.).
-          if (marketDataService.getLowestSellPrice(regionId, bpTypeId) === undefined) continue;
+          if (
+            marketDataService.getLowestSellPrice(regionId, bpTypeId) ===
+            undefined
+          )
+            continue;
         }
 
         const me = ownedBp?.materialEfficiency ?? 0;
@@ -692,7 +705,10 @@ class ManufacturingService {
           regionId,
           rec.productTypeId,
         );
-        const historySummary = marketDataService.getHistorySummarySync(regionId, rec.productTypeId);
+        const historySummary = marketDataService.getHistorySummarySync(
+          regionId,
+          rec.productTypeId,
+        );
         const product90dAvg = historySummary?.avgPrice;
         const product90dDailyVolume = historySummary?.avgVolume;
         const revenueVsSell =
@@ -929,7 +945,10 @@ class ManufacturingService {
           regionId,
           rec.productTypeId,
         );
-        const lmHistorySummary = marketDataService.getHistorySummarySync(regionId, rec.productTypeId);
+        const lmHistorySummary = marketDataService.getHistorySummarySync(
+          regionId,
+          rec.productTypeId,
+        );
         const product90dAvg = lmHistorySummary?.avgPrice;
 
         const revenueVsSell =
