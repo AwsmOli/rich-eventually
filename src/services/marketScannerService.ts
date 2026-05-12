@@ -131,10 +131,14 @@ class MarketScannerService {
       this.isFetchingOrders.value = false;
     }
 
-    // Schedule next refresh from ESI's Expires header; fall back to 30 s if absent.
+    // Schedule next refresh from ESI's Expires header.
+    // Enforce a minimum of 4 minutes: large regions take many pages to fetch,
+    // so by the time doFetchAndIndex returns the first-page Expires may already
+    // be almost past, which would cause a tight re-fetch loop.
+    // Fall back to 5 minutes if the header was absent.
     const delay = expiresAt
-      ? Math.max(5_000, expiresAt - Date.now() + 2_000)
-      : 30_000;
+      ? Math.max(4 * 60_000, expiresAt - Date.now() + 2_000)
+      : 5 * 60_000;
     this.scheduleRegion(regionId, delay);
   }
 

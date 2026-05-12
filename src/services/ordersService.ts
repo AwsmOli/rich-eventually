@@ -15,6 +15,7 @@ import { ref, watch } from "vue";
 
 import { eveAuthService } from "./eveAuthService";
 import { kvGet, kvSet } from "./idbService";
+import { marketDataService } from "./marketDataService";
 import { toastService } from "./toastService";
 
 const ESI_BASE = "https://esi.evetech.net/latest";
@@ -125,6 +126,13 @@ class OrdersService {
       }
     });
 
+    // Whenever the market scanner finishes a region fetch, patch open order
+    // prices from the in-memory cache — no extra ESI calls needed.
+    watch(
+      () => marketDataService.marketTick.value,
+      () => { this.patchPricesFromCache(); },
+    );
+
     // When the active character changes (switch or logout), clear stale data
     // and restart polling for the new character.
     watch(
@@ -166,6 +174,27 @@ class OrdersService {
       clearTimeout(this.marketPriceTimer);
       this.marketPriceTimer = undefined;
     }
+  }
+
+  /**
+   * Patches open order prices from the in-memory market cache (no ESI calls).
+   * Called whenever marketTick increments (scanner finished a region).
+   */
+  private patchPricesFromCache(): void {
+    const orders = this.openOrders.value;
+    if (orders.length === 0) return;
+
+    let changed = false;
+    const patched = orders.map((o) => {
+      const regionOrders = marketDataService.getRegionOrders(o.regionId);
+      const m = regionOrders.find((r) => r.orderId === o.orderId);
+      if (!m) return o; // not in cache yet — don't flag as filled
+      if (m.price === o.price && m.volumeRemain === o.volumeRemain) return o;
+      changed = true;
+      return { ...o, price: m.price, volumeRemain: m.volumeRemain };
+    });
+
+    if (changed) this.openOrders.value = patched;
   }
 
   /**
