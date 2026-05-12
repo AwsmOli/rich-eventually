@@ -74,7 +74,10 @@ class StationTradeService {
       const cheapest = sellByType.get(order.typeId);
       if (cheapest === undefined) continue;
       if (order.price <= cheapest * 2) {
-        sellVolumeByType.set(order.typeId, (sellVolumeByType.get(order.typeId) ?? 0) + order.volumeRemain);
+        sellVolumeByType.set(
+          order.typeId,
+          (sellVolumeByType.get(order.typeId) ?? 0) + order.volumeRemain,
+        );
       }
     }
 
