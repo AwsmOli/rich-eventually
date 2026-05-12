@@ -18,6 +18,7 @@ import {
   historySummaryGet,
   historySummaryPut,
   marketOrdersGet,
+  marketOrdersPut,
   typeCacheClear,
   typeCacheGetAll,
   typeCachePutBulk,
@@ -494,10 +495,19 @@ class MarketDataService {
   }
 
   private async saveRegionToStorage(
-    _regionId: number,
-    _orders: GetMarketsRegionIdOrders200Ok[],
+    regionId: number,
+    orders: GetMarketsRegionIdOrders200Ok[],
   ): Promise<void> {
-    // IDB caching disabled — always fetch fresh from ESI.
+    const compact: CompactOrder[] = orders.map((o) => [
+      o.typeId,
+      o.price,
+      o.isBuyOrder ? 1 : 0,
+      o.systemId,
+      o.volumeRemain,
+      o.minVolume,
+      o.locationId,
+    ]);
+    await marketOrdersPut({ regionId, data: compact, storedAt: Date.now() });
   }
 
   /** Returns true if region orders have been loaded into the in-memory cache. */

@@ -232,6 +232,7 @@ function onSkillsLoaded(skills: CharacterSkills): void {
   filters.value = { ...filters.value, accountingLevel: skills.accounting, brokerFeePercent: brokerFeeFromLevel(skills.brokerRelations) };
   stationFilters.value = { ...stationFilters.value, accountingLevel: skills.accounting, brokerFeePercent: brokerFeeFromLevel(skills.brokerRelations) };
   manufacturingService.setAccountingLevel(skills.accounting);
+  manufacturingService.setBrokerFeeRate(brokerFeeFromLevel(skills.brokerRelations) / 100);
   // Show orders panel automatically when a character logs in.
   showOrdersPanel.value = true;
   ordersService.startPolling();

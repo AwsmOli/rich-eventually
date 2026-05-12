@@ -148,6 +148,32 @@ class MarketScannerService {
       this.autoUpdate.value = savedAutoUpdate;
     }
 
+    // Restore cached market orders from IDB so the UI is populated immediately.
+    const restoreResults = await Promise.all(
+      MAJOR_REGIONS.map(async (regionId) => {
+        const ok = await marketDataService.restoreRegionFromStorage(regionId);
+        if (ok) {
+          const storedAt = await marketDataService.getRegionStoredAt(regionId);
+          return storedAt;
+        }
+        return undefined;
+      }),
+    );
+    const latestStoredAt =
+      restoreResults
+        .filter((t): t is number => t !== undefined)
+        .reduce((max, t) => Math.max(max, t), 0) || undefined;
+    if (latestStoredAt) {
+      this.lastOrdersFetchedAt.value = latestStoredAt;
+      const restoredTs = new Map<number, number>();
+      for (let i = 0; i < MAJOR_REGIONS.length; i++) {
+        if (restoreResults[i] !== undefined) {
+          restoredTs.set(MAJOR_REGIONS[i], restoreResults[i]!);
+        }
+      }
+      this.regionFetchedAt.value = restoredTs;
+    }
+
     if (!this.autoUpdate.value) {
       this.startCountdown();
       return;

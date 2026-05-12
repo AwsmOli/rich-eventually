@@ -9,7 +9,7 @@ const FUZZWORK_BLUEPRINT_API =
   "https://www.fuzzwork.co.uk/blueprint/api/blueprint.php";
 
 const MATERIAL_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days — SDE rarely changes
-const IDB_MATERIAL_KEY = "mfg-materials-v3:"; // v3: null sentinels only for logical negatives
+const IDB_MATERIAL_KEY = "mfg-materials-v6:"; // v6: blueprintSkills (correct field name)
 
 // ── ESI wire types ────────────────────────────────────────────────────────────
 
@@ -58,6 +58,15 @@ interface FuzzworkData {
       typeid: number;
       name: string;
       quantity: number;
+    }>
+  >;
+  blueprintSkills?: Record<
+    string,
+    Array<{
+      // activity_id → required skills
+      typeid: number;
+      name: string;
+      level: number;
     }>
   >;
 }
@@ -112,6 +121,17 @@ export interface ManufacturingOpportunity {
   product90dDailyVolume: number | undefined;
   /** The best-ME owned blueprint for this type, if the character has one */
   ownedBlueprint: CharacterBlueprint | undefined;
+  /** Manufacturing skill requirements from Fuzzwork */
+  requiredSkills: Array<{
+    typeId: number;
+    name: string;
+    level: number;
+    characterLevel: number | undefined;
+  }>;
+  /** True if the character meets all required skills (undefined = not logged in) */
+  skillsMet: boolean | undefined;
+  /** Cheapest sell price for the blueprint itself (for unowned BPs) */
+  blueprintSellPrice: number | undefined;
 }
 
 export interface ManufacturingJob {
@@ -140,7 +160,13 @@ interface MaterialRecord {
   producesQty: number;
   baseTimeSec: number;
   materials: Array<{ typeId: number; quantity: number }>;
+  skills: Array<{ typeId: number; name: string; level: number }>;
   cachedAt: number;
+}
+
+interface EsiCharacterSkill {
+  skill_id: number;
+  active_skill_level: number;
 }
 
 // ── Service ───────────────────────────────────────────────────────────────────
@@ -155,10 +181,39 @@ class ManufacturingService {
   public readonly needsRelogin = ref(false);
 
   private accountingLevel = 5;
+  private brokerFeeRate = 0.03; // default 3% (Broker Relations 0)
   private readonly materialMemCache = new Map<number, MaterialRecord | null>();
+  /** Character skill levels keyed by skillId — cached per scan. */
+  private charSkillMap: Map<number, number> | undefined;
 
   public setAccountingLevel(level: number): void {
     this.accountingLevel = level;
+  }
+
+  public setBrokerFeeRate(rate: number): void {
+    this.brokerFeeRate = rate;
+  }
+
+  private async fetchCharacterSkills(
+    token: string,
+    characterId: number,
+  ): Promise<Map<number, number> | undefined> {
+    try {
+      const resp = await fetch(
+        `${ESI_BASE}/characters/${characterId}/skills/?datasource=tranquility`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      if (!resp.ok) {
+        console.warn(`[mfg] fetchCharacterSkills failed: ${resp.status}`);
+        return undefined;
+      }
+      const data = (await resp.json()) as { skills: EsiCharacterSkill[] };
+      return new Map(
+        data.skills.map((s) => [s.skill_id, s.active_skill_level]),
+      );
+    } catch {
+      return undefined;
+    }
   }
 
   /**
@@ -185,10 +240,12 @@ class ManufacturingService {
         return;
       }
 
-      const [esiBps, esiJobs] = await Promise.all([
+      const [esiBps, esiJobs, charSkillMap] = await Promise.all([
         this.fetchBlueprints(token, character.characterId),
         this.fetchIndustryJobs(token, character.characterId),
+        this.fetchCharacterSkills(token, character.characterId),
       ]);
+      this.charSkillMap = charSkillMap;
 
       console.log(
         `[mfg] ESI blueprints: ${esiBps.length}, jobs: ${esiJobs.length}`,
@@ -305,6 +362,7 @@ class ManufacturingService {
         total: 0,
       };
       const salesTaxRate = 0.08 * Math.max(0, 1 - this.accountingLevel * 0.11);
+      const brokerFeeRate = this.brokerFeeRate;
       const opportunities: ManufacturingOpportunity[] = [];
 
       for (const [bpTypeId, rec] of materialMap) {
@@ -321,7 +379,9 @@ class ManufacturingService {
           );
           const unitCost =
             marketDataService.getLowestSellPrice(regionId, m.typeId) ?? 0;
-          const totalCost = adjustedQty * unitCost;
+          // Buying materials via buy order needs no fee; buying via sell order
+          // (instant buy) incurs the broker fee on the purchase.
+          const totalCost = adjustedQty * unitCost * (1 + brokerFeeRate);
           materialCost += totalCost;
           return {
             typeId: m.typeId,
@@ -354,11 +414,11 @@ class ManufacturingService {
 
         const netProfitVsSell =
           revenueVsSell !== undefined
-            ? revenueVsSell * (1 - salesTaxRate) - materialCost
+            ? revenueVsSell * (1 - salesTaxRate - brokerFeeRate) - materialCost
             : undefined;
         const netProfitVs90d =
           revenueVs90d !== undefined
-            ? revenueVs90d * (1 - salesTaxRate) - materialCost
+            ? revenueVs90d * (1 - salesTaxRate - brokerFeeRate) - materialCost
             : undefined;
 
         opportunities.push({
@@ -386,6 +446,21 @@ class ManufacturingService {
               : undefined,
           product90dDailyVolume: historySummary?.avgVolume,
           ownedBlueprint: ownedBp,
+          requiredSkills: (rec.skills ?? []).map((s) => ({
+            ...s,
+            characterLevel: this.charSkillMap?.get(s.typeId),
+          })),
+          skillsMet:
+            (rec.skills ?? []).length === 0
+              ? true
+              : this.charSkillMap !== undefined
+                ? (rec.skills ?? []).every(
+                    (s) => (this.charSkillMap!.get(s.typeId) ?? 0) >= s.level,
+                  )
+                : undefined,
+          blueprintSellPrice: ownedBp
+            ? undefined
+            : marketDataService.getLowestSellPrice(regionId, bpTypeId),
         });
       }
 
@@ -498,10 +573,14 @@ class ManufacturingService {
         try {
           const token = await eveAuthService.getAccessToken();
           if (token) {
-            [esiBps, esiJobs] = await Promise.all([
+            const [bps, jobs, skillMap] = await Promise.all([
               this.fetchBlueprints(token, character.characterId),
               this.fetchIndustryJobs(token, character.characterId),
+              this.fetchCharacterSkills(token, character.characterId),
             ]);
+            esiBps = bps;
+            esiJobs = jobs;
+            this.charSkillMap = skillMap;
             console.log(
               `[mfg/scan] ESI: ${esiBps.length} blueprints, ${esiJobs.length} jobs`,
             );
@@ -656,6 +735,7 @@ class ManufacturingService {
         total: 0,
       };
       const salesTaxRate = 0.08 * Math.max(0, 1 - this.accountingLevel * 0.11);
+      const brokerFeeRate = this.brokerFeeRate;
       const opportunities: ManufacturingOpportunity[] = [];
 
       for (const [bpTypeId, rec] of materialMap) {
@@ -688,7 +768,7 @@ class ManufacturingService {
           );
           const unitCost =
             marketDataService.getLowestSellPrice(regionId, m.typeId) ?? 0;
-          const totalCost = adjustedQty * unitCost;
+          const totalCost = adjustedQty * unitCost * (1 + brokerFeeRate);
           materialCost += totalCost;
           return {
             typeId: m.typeId,
@@ -721,11 +801,11 @@ class ManufacturingService {
             : undefined;
         const netProfitVsSell =
           revenueVsSell !== undefined
-            ? revenueVsSell * (1 - salesTaxRate) - materialCost
+            ? revenueVsSell * (1 - salesTaxRate - brokerFeeRate) - materialCost
             : undefined;
         const netProfitVs90d =
           revenueVs90d !== undefined
-            ? revenueVs90d * (1 - salesTaxRate) - materialCost
+            ? revenueVs90d * (1 - salesTaxRate - brokerFeeRate) - materialCost
             : undefined;
 
         opportunities.push({
@@ -753,6 +833,21 @@ class ManufacturingService {
               : undefined,
           product90dDailyVolume,
           ownedBlueprint: ownedBp,
+          requiredSkills: (rec.skills ?? []).map((s) => ({
+            ...s,
+            characterLevel: this.charSkillMap?.get(s.typeId),
+          })),
+          skillsMet:
+            (rec.skills ?? []).length === 0
+              ? true
+              : this.charSkillMap !== undefined
+                ? (rec.skills ?? []).every(
+                    (s) => (this.charSkillMap!.get(s.typeId) ?? 0) >= s.level,
+                  )
+                : undefined,
+          blueprintSellPrice: ownedBp
+            ? undefined
+            : marketDataService.getLowestSellPrice(regionId, bpTypeId),
         });
       }
 
@@ -849,6 +944,24 @@ class ManufacturingService {
     };
 
     try {
+      // Fetch character skills if logged in (for skill met indicators).
+      const character = eveAuthService.character.value;
+      if (character) {
+        try {
+          const token = await eveAuthService.getAccessToken();
+          if (token) {
+            this.charSkillMap = await this.fetchCharacterSkills(
+              token,
+              character.characterId,
+            );
+          }
+        } catch {
+          // Optional — non-fatal
+        }
+      } else {
+        this.charSkillMap = undefined;
+      }
+
       // Collect unique typeIds from sell orders in this region.
       const allOrders = marketDataService.getRegionOrders(regionId);
       const typeIds = [
@@ -918,6 +1031,7 @@ class ManufacturingService {
         total: 0,
       };
       const salesTaxRate = 0.08 * Math.max(0, 1 - this.accountingLevel * 0.11);
+      const brokerFeeRate = this.brokerFeeRate;
       const opportunities: ManufacturingOpportunity[] = [];
 
       for (const [queriedTypeId, rec] of materialMap) {
@@ -927,7 +1041,7 @@ class ManufacturingService {
         const materials: MfgMaterial[] = rec.materials.map((m) => {
           const unitCost =
             marketDataService.getLowestSellPrice(regionId, m.typeId) ?? 0;
-          const totalCost = m.quantity * unitCost;
+          const totalCost = m.quantity * unitCost * (1 + brokerFeeRate);
           materialCost += totalCost;
           return {
             typeId: m.typeId,
@@ -961,11 +1075,11 @@ class ManufacturingService {
             : undefined;
         const netProfitVsSell =
           revenueVsSell !== undefined
-            ? revenueVsSell * (1 - salesTaxRate) - materialCost
+            ? revenueVsSell * (1 - salesTaxRate - brokerFeeRate) - materialCost
             : undefined;
         const netProfitVs90d =
           revenueVs90d !== undefined
-            ? revenueVs90d * (1 - salesTaxRate) - materialCost
+            ? revenueVs90d * (1 - salesTaxRate - brokerFeeRate) - materialCost
             : undefined;
 
         opportunities.push({
@@ -993,6 +1107,22 @@ class ManufacturingService {
               : undefined,
           product90dDailyVolume: lmHistorySummary?.avgVolume,
           ownedBlueprint: undefined,
+          requiredSkills: (rec.skills ?? []).map((s) => ({
+            ...s,
+            characterLevel: this.charSkillMap?.get(s.typeId),
+          })),
+          skillsMet:
+            (rec.skills ?? []).length === 0
+              ? true
+              : this.charSkillMap !== undefined
+                ? (rec.skills ?? []).every(
+                    (s) => (this.charSkillMap!.get(s.typeId) ?? 0) >= s.level,
+                  )
+                : undefined,
+          blueprintSellPrice: marketDataService.getLowestSellPrice(
+            regionId,
+            queriedTypeId,
+          ),
         });
       }
 
@@ -1080,9 +1210,14 @@ class ManufacturingService {
     try {
       const stored = await kvGet<MaterialRecord & { _null?: true }>(idbKey);
       if (stored && stored.cachedAt + MATERIAL_CACHE_TTL_MS > Date.now()) {
-        const result = stored._null ? null : (stored as MaterialRecord);
-        this.materialMemCache.set(blueprintTypeId, result);
-        return result;
+        // Guard against records written before the `skills` field was added.
+        if (stored._null === undefined && stored.skills === undefined) {
+          // Fall through to re-fetch so skills get populated.
+        } else {
+          const result = stored._null ? null : (stored as MaterialRecord);
+          this.materialMemCache.set(blueprintTypeId, result);
+          return result;
+        }
       }
     } catch {
       // IDB unavailable — fall through
@@ -1131,6 +1266,11 @@ class ManufacturingService {
         materials: mfgMaterials
           .filter((m) => m.typeid > 0 && m.quantity > 0)
           .map((m) => ({ typeId: m.typeid, quantity: m.quantity })),
+        skills: (data.blueprintSkills?.["1"] ?? []).map((s) => ({
+          typeId: s.typeid,
+          name: s.name,
+          level: s.level,
+        })),
         cachedAt: Date.now(),
       };
 

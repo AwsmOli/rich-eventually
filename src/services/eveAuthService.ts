@@ -53,6 +53,19 @@ async function sha256Base64Url(plain: string): Promise<string> {
 
 // ── Service ───────────────────────────────────────────────────────────────────
 
+/** Decode JWT payload without verification (scopes are not sensitive). */
+function jwtScopes(token: string): string[] {
+  try {
+    const payload = JSON.parse(
+      atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")),
+    ) as { scp?: string | string[] };
+    if (!payload.scp) return [];
+    return Array.isArray(payload.scp) ? payload.scp : payload.scp.split(" ");
+  } catch {
+    return [];
+  }
+}
+
 class EveAuthService {
   /** All saved characters. */
   public readonly accounts = ref<CharacterAuth[]>([]);
@@ -66,6 +79,14 @@ class EveAuthService {
       (a) => a.characterId === this.activeCharacterId.value,
     ),
   );
+
+  /** True if the active character's token is missing one or more required scopes. */
+  public readonly scopesMissing = computed<boolean>(() => {
+    const auth = this.character.value;
+    if (!auth) return false;
+    const have = new Set(jwtScopes(auth.accessToken));
+    return SCOPES.split(" ").some((s) => !have.has(s));
+  });
 
   /** Resolves once the persisted accounts have been loaded from IDB. */
   private readonly accountsReady: Promise<void>;

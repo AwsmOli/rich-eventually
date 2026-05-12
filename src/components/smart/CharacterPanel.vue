@@ -129,6 +129,9 @@ function switchTo(characterId: number): void {
           span.skill-badge Accounting {{ skills.accounting }}
           span.skill-badge Broker Relations {{ skills.brokerRelations }}
         .loading-hint(v-else-if="isLoading") Loading…
+      .scope-warning(v-if="eveAuthService.scopesMissing.value")
+        | ⚠ Missing permissions —
+        button.scope-relogin-btn(type="button" @click="login") re-login to fix
 </template>
 
 <style scoped lang="scss">
@@ -137,6 +140,22 @@ function switchTo(characterId: number): void {
   display: flex;
   flex-wrap: wrap;
   gap: 0.75rem;
+}
+
+.scope-warning {
+  color: #f0a500;
+  font-size: 0.8rem;
+  margin-top: 0.25rem;
+}
+
+.scope-relogin-btn {
+  background: none;
+  border: none;
+  color: #f0a500;
+  cursor: pointer;
+  font-size: 0.8rem;
+  padding: 0;
+  text-decoration: underline;
 }
 
 .accounts-row {

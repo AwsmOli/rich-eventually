@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 
 import { eveAuthService } from '../../services/eveAuthService';
 import { manufacturingService, type ManufacturingJob } from '../../services/manufacturingService';
@@ -34,6 +34,14 @@ function toggleExpand(bpTypeId: number): void {
   expanded.value = next;
 }
 
+function handleRowClick(row: (typeof opportunities.value)[0], event: MouseEvent): void {
+  if (event.shiftKey) {
+    window.open(`https://everef.net/type/${row.productTypeId}`, '_blank', 'noopener');
+    return;
+  }
+  toggleExpand(row.blueprintTypeId);
+}
+
 // ── Sorted opportunities ─────────────────────────────────────────────────────
 
 const UNOWNED_CAP = 200;
@@ -43,6 +51,8 @@ const sortedOpportunities = computed(() => {
   const cmp = (a: (typeof opportunities.value)[0], b: (typeof opportunities.value)[0]) => {
     const val = (o: (typeof opportunities.value)[0]): number => {
       if (sortField.value === 'iskPerHour') return profitPerHour(o) ?? -Infinity;
+      if (sortField.value === 'marginVs90d' || sortField.value === 'marginVsSell') return conservativeMargin(o) ?? -Infinity;
+      if (sortField.value === 'netProfitVs90d') return conservativeProfit(o) ?? -Infinity;
       return (o[sortField.value] as number | undefined) ?? -Infinity;
     };
     return (val(a) - val(b)) * dir;
@@ -60,7 +70,14 @@ const sortedOpportunities = computed(() => {
 
 // Auto-reload when the market scanner finishes a full refresh cycle.
 watch(lastOrdersFetchedAt, () => {
-  if (!isLoading.value && opportunities.value.length > 0) {
+  if (!isLoading.value) {
+    void manufacturingService.scan(JITA_REGION_ID);
+  }
+});
+
+// On mount: if market data is already loaded (restored from IDB), trigger a scan.
+onMounted(() => {
+  if (lastOrdersFetchedAt.value !== undefined && !isLoading.value && opportunities.value.length === 0) {
     void manufacturingService.scan(JITA_REGION_ID);
   }
 });
@@ -104,8 +121,24 @@ function marginClass(margin: number | undefined): string {
   return 'negative';
 }
 
+/** Returns the more conservative (lower) profit — min of 90d and sell when both are available. */
+function conservativeProfit(row: (typeof opportunities.value)[0]): number | undefined {
+  const { netProfitVs90d, netProfitVsSell } = row;
+  if (netProfitVs90d !== undefined && netProfitVsSell !== undefined)
+    return Math.min(netProfitVs90d, netProfitVsSell);
+  return netProfitVs90d ?? netProfitVsSell;
+}
+
+/** Returns the more conservative (lower) margin — min of 90d and sell when both are available. */
+function conservativeMargin(row: (typeof opportunities.value)[0]): number | undefined {
+  const { marginVs90d, marginVsSell } = row;
+  if (marginVs90d !== undefined && marginVsSell !== undefined)
+    return Math.min(marginVs90d, marginVsSell);
+  return marginVs90d ?? marginVsSell;
+}
+
 function profitPerHour(row: (typeof opportunities.value)[0]): number | undefined {
-  const profit = row.netProfitVs90d ?? row.netProfitVsSell;
+  const profit = conservativeProfit(row);
   if (profit === undefined || row.baseTimeSec <= 0) return undefined;
   return profit / row.baseTimeSec * 3600;
 }
@@ -148,9 +181,9 @@ function onMinVolumeChange(e: Event): void {
         :title="lastOrdersFetchedAt ? (character ? 'Scan market + your owned blueprints' : 'Scan market for profitable blueprints') : 'Waiting for market data…'"
       ) {{ isLoading ? 'Scanning…' : '⟳ Scan' }}
 
-  //- Re-login required (missing blueprint/industry scopes)
-  .relogin-notice(v-if="needsRelogin")
-    p.relogin-msg New permissions are needed to read your blueprints and industry jobs.
+  //- Re-login required (missing scopes or blueprint/industry error)
+  .relogin-notice(v-if="needsRelogin || (character && eveAuthService.scopesMissing.value)")
+    p.relogin-msg New permissions are needed. Please re-login to grant all required scopes.
     button.relogin-btn(type="button" @click="eveAuthService.login()") Re-login with EVE Online
 
   //- Error feedback
@@ -231,10 +264,10 @@ function onMinVolumeChange(e: Event): void {
         tbody
           template(v-for="row in sortedOpportunities" :key="row.blueprintTypeId")
             tr.opp-row(
-              :class="{ 'opp-row--owned': row.ownedBlueprint !== undefined, 'opp-row--expanded': expanded.has(row.blueprintTypeId) }"
-              @click="toggleExpand(row.blueprintTypeId)"
+              :class="{ 'opp-row--owned': row.ownedBlueprint !== undefined, 'opp-row--expanded': expanded.has(row.blueprintTypeId), 'opp-row--skills-missing': row.skillsMet === false }"
+              @click="handleRowClick(row, $event)"
               role="button"
-              title="Click to expand materials"
+              title="Click to expand · Shift+click to open in browser"
             )
               td.td-name
                 .name-cell
@@ -247,6 +280,8 @@ function onMinVolumeChange(e: Event): void {
                     span.badge.badge--bpo(v-if="row.ownedBlueprint?.isOriginal") BPO
                     span.badge.badge--bpc(v-if="row.ownedBlueprint && !row.ownedBlueprint.isOriginal") BPC
                     span.badge.badge--me(v-if="row.ownedBlueprint") ME{{ row.ownedBlueprint.materialEfficiency }}
+                    span.badge.badge--skills-ok(v-if="row.skillsMet === true && row.requiredSkills.length > 0") skills ✓
+                    span.badge.badge--skills-no(v-if="row.skillsMet === false") skills ✗
               td
                 IskValue(:value="row.materialCost")
               td
@@ -276,17 +311,15 @@ function onMinVolumeChange(e: Event): void {
               td.td-profit
                 .price-pair
                   .price-line
-                    span(:class="marginClass(row.marginVs90d)")
-                      template(v-if="row.netProfitVs90d !== undefined")
-                        | {{ row.netProfitVs90d >= 0 ? '+' : '' }}
-                        IskValue.inline(:value="row.netProfitVs90d")
+                    span(:class="marginClass(conservativeMargin(row))")
+                      template(v-if="conservativeProfit(row) !== undefined")
+                        | {{ (conservativeProfit(row) || 0) >= 0 ? '+' : '' }}
+                        IskValue.inline(:value="conservativeProfit(row) || 0")
                       template(v-else) —
                   .price-line
-                    span(:class="marginClass(row.marginVs90d)")
-                      template(v-if="row.marginVs90d !== undefined")
-                        | {{ (row.marginVs90d * 100).toFixed(1) }}%
-                      template(v-else-if="row.marginVsSell !== undefined")
-                        | {{ (row.marginVsSell * 100).toFixed(1) }}%
+                    span(:class="marginClass(conservativeMargin(row))")
+                      template(v-if="conservativeMargin(row) !== undefined")
+                        | {{ ((conservativeMargin(row) || 0) * 100).toFixed(1) }}%
                       template(v-else) —
 
             //- Expanded material breakdown
@@ -312,6 +345,23 @@ function onMinVolumeChange(e: Event): void {
                   .mat-total
                     span Total material cost
                     IskValue(:value="row.materialCost")
+                  template(v-if="!row.ownedBlueprint && row.blueprintSellPrice !== undefined")
+                    .mat-total.bp-cost-row
+                      span Blueprint cost (est.)
+                      IskValue(:value="row.blueprintSellPrice")
+                  template(v-if="row.requiredSkills.length > 0")
+                    .mat-header.skills-header
+                      span.mat-col-name Required Skills
+                      span.mat-col-qty Level
+                      span.mat-col-qty Yours
+                    .mat-line(v-for="sk in row.requiredSkills" :key="sk.typeId")
+                      span.mat-col-name {{ sk.name }}
+                      span.mat-col-qty {{ sk.level }}
+                      span.mat-col-qty(
+                        v-if="sk.characterLevel !== undefined"
+                        :class="{ positive: sk.characterLevel >= sk.level, negative: sk.characterLevel < sk.level }"
+                      ) {{ sk.characterLevel }}
+                      span.mat-col-qty(v-else) —
 </template>
 
 <style scoped lang="scss">
@@ -733,6 +783,16 @@ function onMinVolumeChange(e: Event): void {
     background: rgba(255, 190, 60, 0.12);
     color: #ffbe3c;
   }
+
+  &--skills-ok {
+    background: rgba(100, 220, 130, 0.12);
+    color: #64dc82;
+  }
+
+  &--skills-no {
+    background: rgba(255, 80, 80, 0.12);
+    color: #ff5050;
+  }
 }
 
 .price-pair {
@@ -801,5 +861,26 @@ function onMinVolumeChange(e: Event): void {
   margin-top: 0.4rem;
   padding-top: 0.4rem;
   font-size: 0.82rem;
+
+  &.bp-cost-row {
+    color: #7a94b2;
+    font-weight: 500;
+    font-size: 0.78rem;
+  }
+}
+
+.skills-header {
+  border-top: 1px solid #0e1c2c;
+  grid-template-columns: 2fr 1fr 1fr;
+  margin-top: 0.6rem;
+  padding-top: 0.25rem;
+}
+
+.skills-header ~ .mat-line {
+  grid-template-columns: 2fr 1fr 1fr;
+}
+
+.opp-row--skills-missing td {
+  opacity: 0.7;
 }
 </style>
