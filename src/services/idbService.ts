@@ -111,6 +111,7 @@ export interface HistorySummaryRecord {
   key: string; // "regionId:typeId"
   avgOrderCount: number;
   avgPrice: number | undefined;
+  avgVolume?: number;
   expiresAt: number;
 }
 

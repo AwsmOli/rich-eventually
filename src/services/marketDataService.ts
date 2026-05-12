@@ -77,7 +77,7 @@ class MarketDataService {
   /** In-memory summary cache — avoids re-parsing localStorage on repeated calls. */
   private readonly summaryCacheMemory = new Map<
     string,
-    { avgOrderCount: number; avgPrice: number | undefined }
+    { avgOrderCount: number; avgPrice: number | undefined; avgVolume: number | undefined }
   >();
   private readonly TYPE_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
   /** Always resolves immediately — retained for API compatibility with marketScannerService. */
@@ -215,7 +215,7 @@ class MarketDataService {
   public getHistorySummarySync(
     regionId: number,
     typeId: number,
-  ): { avgOrderCount: number; avgPrice: number | undefined } | undefined {
+  ): { avgOrderCount: number; avgPrice: number | undefined; avgVolume: number | undefined } | undefined {
     // In-memory summary cache (populated by getHistorySummary calls in this session).
     const memKey = `${regionId}:${typeId}`;
     const mem = this.summaryCacheMemory.get(memKey);
@@ -229,7 +229,7 @@ class MarketDataService {
   public async getHistorySummary(
     regionId: number,
     typeId: number,
-  ): Promise<{ avgOrderCount: number; avgPrice: number | undefined }> {
+  ): Promise<{ avgOrderCount: number; avgPrice: number | undefined; avgVolume: number | undefined }> {
     // Check in-memory cache first (populated this session).
     const memKey = `${regionId}:${typeId}`;
     const mem = this.summaryCacheMemory.get(memKey);
@@ -239,12 +239,18 @@ class MarketDataService {
     try {
       const record = await historySummaryGet(memKey);
       if (record !== undefined && record.expiresAt > Date.now()) {
-        const result = {
-          avgOrderCount: record.avgOrderCount,
-          avgPrice: record.avgPrice,
-        };
-        this.summaryCacheMemory.set(memKey, result);
-        return result;
+        // Treat old records that have avgPrice but no avgVolume as stale —
+        // they were cached before avgVolume was tracked and must be re-fetched.
+        const isOldFormat = record.avgPrice !== undefined && record.avgVolume === undefined;
+        if (!isOldFormat) {
+          const result = {
+            avgOrderCount: record.avgOrderCount,
+            avgPrice: record.avgPrice,
+            avgVolume: record.avgVolume,
+          };
+          this.summaryCacheMemory.set(memKey, result);
+          return result;
+        }
       }
     } catch {
       /* IDB unavailable — fall through to ESI */
@@ -252,6 +258,7 @@ class MarketDataService {
 
     let avgOrderCount = 0;
     let avgPrice: number | undefined;
+    let avgVolume: number | undefined;
     try {
       const history = await this.getTypeHistory(regionId, typeId, 90);
       if (history.length > 0) {
@@ -259,19 +266,22 @@ class MarketDataService {
           history.reduce((sum, d) => sum + d.orderCount, 0) / history.length;
         avgPrice =
           history.reduce((sum, d) => sum + d.average, 0) / history.length;
+        avgVolume =
+          history.reduce((sum, d) => sum + d.volume, 0) / history.length;
       }
     } catch {
       // 404 "Type not found" or other permanent errors — cache the empty result
       // so we don't re-request on every scan.
     }
 
-    const result = { avgOrderCount, avgPrice };
+    const result = { avgOrderCount, avgPrice, avgVolume };
     // Populate both caches.
     this.summaryCacheMemory.set(`${regionId}:${typeId}`, result);
     void historySummaryPut({
       key: `${regionId}:${typeId}`,
       avgOrderCount,
       avgPrice,
+      avgVolume,
       expiresAt: Date.now() + 24 * 60 * 60 * 1000,
     });
     return result;
